@@ -52,16 +52,17 @@ CREATE TABLE teachers (
 );
 CREATE INDEX idx_teachers_center ON teachers(center_id);
 
--- One shared login per (center, section), e.g. Ndov.Pri@mohiafrica.org
-CREATE TABLE teacher_section_logins (
+-- ONE shared teacher login per center (e.g. babadogo@mohiafrica.org) covering
+-- every section — individual teachers still pick their own name after this
+-- (see /auth/teacher/select), and each teacher's own `section` column above
+-- is what scopes their classes/subjects, not the login itself.
+CREATE TABLE teacher_logins (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  center_id      uuid NOT NULL REFERENCES centers(id) ON DELETE CASCADE,
-  section        section NOT NULL,
+  center_id      uuid NOT NULL UNIQUE REFERENCES centers(id) ON DELETE CASCADE,
   email          text NOT NULL UNIQUE,
-  password_hash  text NOT NULL,
-  UNIQUE (center_id, section)
+  password_hash  text NOT NULL
 );
-CREATE INDEX idx_tsl_center ON teacher_section_logins(center_id);
+CREATE INDEX idx_tl_center ON teacher_logins(center_id);
 
 -- ---------- SCHOOL STRUCTURE ----------
 

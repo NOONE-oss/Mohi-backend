@@ -110,3 +110,57 @@ marksRouter.delete('/', requireRole('teacher', 'admin'), async (req, res) => {
   await query(`DELETE FROM marks WHERE exam_id = $1 AND student_id = $2 AND subject_id = $3`, [examId, studentId, subjectId]);
   res.status(204).end();
 });
+
+// Whole-school bulk upload for one exam — admin only. Columns: School ID,
+// Subject, Score (a CBC sub-level OR a 0-100 percentage). Every student's
+// own class is looked up automatically, so one CSV can cover every class at
+// once instead of teachers entering marks one class/subject at a time.
+// Applies directly even on a published exam — this is an explicit admin bulk
+// action, not a teacher edit, so it doesn't go through the approval queue.
+marksRouter.post('/bulk', requireRole('admin'), async (req, res) => {
+  const { examId, csv } = req.body;
+  if (!examId || !csv || !csv.trim()) return res.status(400).json({ error: 'examId and csv text are required' });
+
+  const exam = await query(`SELECT id FROM exams WHERE id = $1 AND center_id = $2`, [examId, req.auth.centerId]);
+  if (!exam.rows[0]) return res.status(404).json({ error: 'Exam not found at this center' });
+
+  const [students, subjects] = await Promise.all([
+    query(`SELECT id, school_id_number FROM students WHERE center_id = $1`, [req.auth.centerId]),
+    query(`SELECT id, name FROM subjects WHERE center_id = $1`, [req.auth.centerId]),
+  ]);
+  const studentByCode = new Map(students.rows.map(s => [s.school_id_number.toLowerCase(), s.id]));
+  const subjectByName = new Map(subjects.rows.map(s => [s.name.toLowerCase(), s.id]));
+
+  const lines = csv.trim().split(/\r?\n/).map(l => l.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
+  const start = /school ?id/i.test(lines[0]?.[0] || '') ? 1 : 0;
+  let added = 0;
+  const skipped = [];
+
+  for (let i = start; i < lines.length; i++) {
+    const [schoolId, subjectName, scoreRaw] = lines[i];
+    const studentId = schoolId ? studentByCode.get(schoolId.trim().toLowerCase()) : null;
+    if (!studentId) { skipped.push(`Row ${i + 1}: School ID "${schoolId}" not found`); continue; }
+    const subjectId = subjectName ? subjectByName.get(subjectName.trim().toLowerCase()) : null;
+    if (!subjectId) { skipped.push(`Row ${i + 1}: subject "${subjectName}" not found`); continue; }
+
+    const score = (scoreRaw || '').trim();
+    let sublevel, percent = null;
+    if (isValidSublevel(score.toUpperCase())) {
+      sublevel = score.toUpperCase();
+    } else {
+      const pct = Number(score.replace('%', ''));
+      if (!isNaN(pct) && pct >= 0 && pct <= 100) { percent = pct; sublevel = percentToSublevel(pct); }
+      else { skipped.push(`Row ${i + 1}: "${scoreRaw}" isn't a valid sub-level or 0-100 percentage`); continue; }
+    }
+    const points = SUBLEVEL_POINTS[sublevel];
+    await query(
+      `INSERT INTO marks (exam_id, student_id, subject_id, sublevel, points, percent, entered_by_id)
+       VALUES ($1,$2,$3,$4,$5,$6,NULL)
+       ON CONFLICT (exam_id, student_id, subject_id)
+       DO UPDATE SET sublevel = $4, points = $5, percent = $6, updated_at = now()`,
+      [examId, studentId, subjectId, sublevel, points, percent]
+    );
+    added++;
+  }
+  res.json({ added, skipped });
+});

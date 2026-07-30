@@ -14,19 +14,19 @@ async function seed() {
     console.log('Clearing existing data...');
     await client.query(`
       TRUNCATE edit_requests, remarks, marks, exams, grading_bands,
-               teacher_subjects, class_teachers, teacher_section_logins,
+               teacher_subjects, class_teachers, teacher_logins,
                students, teachers, subjects, classes, admins, centers
       RESTART IDENTITY CASCADE
     `);
 
-    console.log('Creating centers...');
+    console.log('Creating centers + their admin/teacher logins...');
     const centerDefs = [
-      { name: 'Ndovoini Center', code: 'MOHI-NDV', location: 'Nairobi, Kenya' },
-      { name: 'Joska Center', code: 'MOHI-JOS', location: 'Joska, Kenya' },
-      { name: 'Turi Center', code: 'MOHI-TUR', location: 'Turi, Kenya' },
-      { name: 'Coramdeo Center', code: 'MOHI-COR', location: 'Kenya' },
-      { name: 'Milimani Center', code: 'MOHI-MIL', location: 'Kenya' },
-      { name: 'Babadogo Center', code: 'MOHI-BBD', location: 'Nairobi, Kenya' },
+      { name: 'Ndovoini Center', code: 'MOHI-NDV', location: 'Nairobi, Kenya', slug: 'ndovoini' },
+      { name: 'Joska Center', code: 'MOHI-JOS', location: 'Joska, Kenya', slug: 'joska' },
+      { name: 'Turi Center', code: 'MOHI-TUR', location: 'Turi, Kenya', slug: 'turi' },
+      { name: 'Coramdeo Center', code: 'MOHI-COR', location: 'Kenya', slug: 'coramdeo' },
+      { name: 'Milimani Center', code: 'MOHI-MIL', location: 'Kenya', slug: 'milimani' },
+      { name: 'Babadogo Center', code: 'MOHI-BBD', location: 'Nairobi, Kenya', slug: 'babadogo' },
     ];
     const centerIds = {};
     for (const c of centerDefs) {
@@ -35,6 +35,14 @@ async function seed() {
         [c.name, c.code, c.location]
       );
       centerIds[c.name] = rows[0].id;
+      await client.query(
+        `INSERT INTO admins (center_id, role, full_name, email, password_hash) VALUES ($1, 'school_admin', $2, $3, $4)`,
+        [rows[0].id, `${c.name} Admin`, `admin@${c.slug}.mohiafrica.org`, await hashPassword('Admin@2026')]
+      );
+      await client.query(
+        `INSERT INTO teacher_logins (center_id, email, password_hash) VALUES ($1, $2, $3)`,
+        [rows[0].id, `${c.slug}@mohiafrica.org`, await hashPassword('Teacher@2026')]
+      );
     }
     const centerId = centerIds['Ndovoini Center']; // full demo data below lives on this one
 
@@ -42,12 +50,6 @@ async function seed() {
     await client.query(
       `INSERT INTO admins (center_id, role, full_name, email, password_hash) VALUES (NULL, 'it_support', $1, $2, $3)`,
       ['MOHI IT Support', 'it@mohi.org', await hashPassword('IT@2026')]
-    );
-
-    console.log('Creating school admin (Ndovoini)...');
-    await client.query(
-      `INSERT INTO admins (center_id, role, full_name, email, password_hash) VALUES ($1, 'school_admin', $2, $3, $4)`,
-      [centerId, 'Ndovoini Admin', 'admin@ndovoini.mohiafrica.org', await hashPassword('Admin@2026')]
     );
 
     console.log('Creating classes...');
@@ -82,18 +84,6 @@ async function seed() {
         [centerId, s.name, s.section]
       );
       subjectIds[s.name] = rows[0].id;
-    }
-
-    console.log('Creating teacher section logins...');
-    for (const [section, email] of [
-      ['PRIMARY', 'ndov.pri@mohiafrica.org'],
-      ['JUNIOR', 'ndov.jss@mohiafrica.org'],
-      ['SENIOR', 'ndov.high@mohiafrica.org'],
-    ]) {
-      await client.query(
-        `INSERT INTO teacher_section_logins (center_id, section, email, password_hash) VALUES ($1,$2,$3,$4)`,
-        [centerId, section, email, await hashPassword('Teacher@2026')]
-      );
     }
 
     console.log('Creating teachers...');
@@ -150,9 +140,9 @@ async function seed() {
     console.log('\nSeed complete.');
     console.log('Centers created:', Object.keys(centerIds).join(', '));
     console.log('Ndovoini Center ID:', centerId);
-    console.log('IT support login: it@mohi.org / IT@2026 (picks a center after login)');
-    console.log('School admin login: admin@ndovoini.mohiafrica.org / Admin@2026');
-    console.log('Teacher (Junior) login: ndov.jss@mohiafrica.org / Teacher@2026');
+    console.log('IT support login: it@mohi.org / IT@2026 (lands on dashboard directly, switch centers there)');
+    console.log('School admin logins: admin@<slug>.mohiafrica.org / Admin@2026 — e.g. admin@ndovoini.mohiafrica.org');
+    console.log('Teacher logins: <slug>@mohiafrica.org / Teacher@2026 — e.g. ndovoini@mohiafrica.org (all sections, one login)');
     console.log('Student login: MOHI-0101 / Student@2026 (forces password reset)');
   } catch (err) {
     await client.query('ROLLBACK');

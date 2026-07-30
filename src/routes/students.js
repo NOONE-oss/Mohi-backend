@@ -58,6 +58,40 @@ studentsRouter.post('/', requireRole('admin'), async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
+// Bulk add via CSV — columns: Full Name, School ID, Class (class matched by
+// name at this center; unmatched class name still creates the student, just
+// unassigned). Client sends the raw CSV text; parsing happens here so the
+// validation rules live in one place.
+studentsRouter.post('/bulk', requireRole('admin'), async (req, res) => {
+  const { csv } = req.body;
+  if (!csv || !csv.trim()) return res.status(400).json({ error: 'csv text is required' });
+
+  const classes = await query(`SELECT id, name FROM classes WHERE center_id = $1`, [req.auth.centerId]);
+  const classByName = new Map(classes.rows.map(c => [c.name.toLowerCase(), c.id]));
+
+  const lines = csv.trim().split(/\r?\n/).map(l => l.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
+  const start = /name/i.test(lines[0]?.[0] || '') ? 1 : 0;
+  let added = 0;
+  const skipped = [];
+  const defaultPasswordHash = await hashPassword(DEFAULT_PASSWORD);
+
+  for (let i = start; i < lines.length; i++) {
+    const [name, idRaw, className] = lines[i];
+    const schoolId = (idRaw || '').trim();
+    if (!name || !schoolId) { skipped.push(`Row ${i + 1}: missing name or School ID`); continue; }
+    const dupe = await query(`SELECT id FROM students WHERE school_id_number = $1`, [schoolId]);
+    if (dupe.rows[0]) { skipped.push(`Row ${i + 1}: School ID "${schoolId}" already in use`); continue; }
+    const classId = className ? classByName.get(className.trim().toLowerCase()) : null;
+    if (className && !classId) skipped.push(`Row ${i + 1}: class "${className}" not found — added with no class`);
+    await query(
+      `INSERT INTO students (school_id_number, center_id, full_name, class_id, password_hash) VALUES ($1,$2,$3,$4,$5)`,
+      [schoolId, req.auth.centerId, name.trim(), classId || null, defaultPasswordHash]
+    );
+    added++;
+  }
+  res.json({ added, skipped });
+});
+
 // Editing a student's name or School ID does NOT happen here — per the
 // approval workflow, those go through POST /edit-requests instead. This
 // endpoint only allows the non-sensitive fields (class, parent contact).

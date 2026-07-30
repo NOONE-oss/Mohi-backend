@@ -34,26 +34,31 @@ schema translates over directly — nothing here is SQL-only by necessity.
   `req.auth.centerId` — a value that comes from the verified JWT, never from
   the request body/params/query string. See `src/middleware/auth.js`.
 - **Admin has two dimensions**, sharing one login form:
-  - `school_admin` — the original role. Individual login, tied to exactly one
-    center (enforced by a DB check constraint), works exactly as before.
-  - `it_support` — one org-wide account (`it@mohi.org`), not tied to any
-    single center. Logging in returns a list of active centers instead of a
-    token (mirrors the teacher's "which teacher are you" step) — IT picks
-    which center to administer, and can switch to a different one mid-session
-    via `/auth/admin/switch-center` without re-entering a password. IT support
+  - `school_admin` — the original role. Individual login
+    (`admin@<slug>.mohiafrica.org`), tied to exactly one center (enforced by
+    a DB check constraint).
+  - `it_support` — one org-wide account (`it@mohi.org`). Logs straight into
+    the dashboard, no center-picker step first — it lands on its
+    most-recently-added center by default and switches centers from inside
+    the dashboard (the strip at the top of the admin shell) via
+    `/auth/admin/switch-center`, no re-entering a password. IT support
     satisfies every `requireRole(...)` check in the app (see
     `middleware/auth.js`) — it can do everything a school admin, teacher, or
-    student's actions require, which is the whole point of the role existing:
-    a place to make changes on behalf of any center without needing a new
-    school_admin account made for every fix.
+    student's actions require.
   - Only IT support can create new centers (`POST /centers`) or list every
-    center at once (`GET /centers` for a school_admin returns just their own,
-    for consistency, not because they're blocked from it — they simply have
-    no other center's id to ask for, since nothing else in the app leaks one).
-- **Roles**: `admin` (school_admin or it_support), `teacher` (shared login
-  per center+section — Primary/Junior/Senior — with a second "which teacher
-  are you" step so mark entries stay traceable), `student` (School ID Number,
-  unique **organization-wide**, shared with parent).
+    center at once (`GET /centers` for a school_admin returns just their own).
+  - **Creating a center auto-provisions its two logins** — e.g. adding
+    "Babadogo Center" creates `admin@babadogo.mohiafrica.org` and
+    `babadogo@mohiafrica.org` automatically, both on a default password
+    returned once in the response for IT to hand over.
+- **Teachers share ONE login per center** (not per section) — e.g.
+  `babadogo@mohiafrica.org` covers Primary, Junior and Senior staff alike,
+  with a "which teacher are you?" step after that shared credential so mark
+  entries stay traceable. Each teacher's own `section` field (set when
+  they're added) scopes their classes/subjects — the login no longer does.
+- **Roles**: `admin` (school_admin or it_support), `teacher` (one shared
+  login per center, all sections, with the "which teacher are you" step),
+  `student` (School ID Number, unique **organization-wide**, shared with parent).
 - **Grading**: CBC 8-point scale (EE1–BE2) plus an optional raw percentage;
   entering a percent auto-derives the sub-level via `src/lib/grading.js`'s
   band table — the same bands as the prototype, flagged there and here as a
@@ -62,6 +67,10 @@ schema translates over directly — nothing here is SQL-only by necessity.
   on an already-published exam, inserts a row into `edit_requests` instead of
   applying immediately. An admin (school_admin or it_support) approves or
   rejects via `/edit-requests`.
+- **CSV bulk upload**: `POST /students/bulk`, `POST /teachers/bulk` (admin,
+  per-center), and `POST /marks/bulk` (admin, whole-school for one exam at
+  once) all take raw CSV text in the request body and parse it server-side —
+  matching UI panels are in Students, Teachers, and Results.
 
 ## What's actually been proven (not just written)
 
@@ -120,8 +129,7 @@ with classes/teachers/students/an exam already in it.
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/auth/admin/login` | school_admin gets a token directly; it_support gets `centerSelectionRequired` + a center list instead |
-| POST | `/auth/admin/select-center` | IT support step 2: pick a center, get a real token |
+| POST | `/auth/admin/login` | both school_admin and it_support get a token directly — no gate |
 | POST | `/auth/admin/switch-center` | IT support only: swap the current token to a different center, no re-login |
 | POST | `/auth/teacher/login` | step 1, returns `sectionToken` + list of teachers |
 | POST | `/auth/teacher/select` | step 2, returns the real token |

@@ -43,15 +43,19 @@ async function main() {
   const englishSubj = (await api('/subjects', { token: adminToken })).data.find(s => s.name === 'English');
   const brian = studentsR.data.find(s => s.school_id_number === 'MOHI-0142');
 
-  // ---- IT login + center picker (exact shape renderCenterPicker/selectCenter expect) ----
+  // ---- IT login: goes straight to dashboard (no center-picker gate), lands on its
+  // most-recently-added center by default, then switches from inside the dashboard ----
   r = await api('/auth/admin/login', { method: 'POST', body: { email: 'it@mohi.org', password: 'IT@2026' } });
-  check(r.status === 200 && r.data.centerSelectionRequired === true && r.data.centers.length === 6, 'IT login requires center pick, sees 6 centers', r.data);
-  const itToken = r.data.itToken;
-  const babadogo = r.data.centers.find(c => c.name === 'Babadogo Center');
-  const ndovoiniFromIt = r.data.centers.find(c => c.name === 'Ndovoini Center');
+  check(r.status === 200 && r.data.token && r.data.isItSupport === true, 'IT login returns a direct token, no gate', r.data);
+  const itDefaultToken = r.data.token;
 
-  r = await api('/auth/admin/select-center', { method: 'POST', body: { itToken, centerId: babadogo.id } });
-  check(r.status === 200 && r.data.token, 'IT selects Babadogo, gets a token', r.data);
+  r = await api('/centers', { token: itDefaultToken });
+  check(r.status === 200 && r.data.length === 6, 'IT sees all 6 centers via /centers', r.data.length);
+  const babadogo = r.data.find(c => c.name === 'Babadogo Center');
+  const ndovoiniFromIt = r.data.find(c => c.name === 'Ndovoini Center');
+
+  r = await api('/auth/admin/switch-center', { method: 'POST', body: { centerId: babadogo.id }, token: itDefaultToken });
+  check(r.status === 200 && r.data.token, 'IT switches to Babadogo from the dashboard', r.data);
   const itBabadogoToken = r.data.token;
 
   r = await api('/classes', { token: itBabadogoToken });
@@ -64,13 +68,17 @@ async function main() {
   r = await api('/classes', { token: itNdovoiniToken });
   check(r.status === 200 && r.data.length === 4, 'IT as Ndovoini now sees 4 classes', r.data.length);
 
-  // ---- Teacher two-step login (exact shape loginTeacher/promptTeacherName/confirmTeacher expect) ----
-  r = await api('/auth/teacher/login', { method: 'POST', body: { email: 'ndov.jss@mohiafrica.org', password: 'Teacher@2026' } });
-  check(r.status === 200 && r.data.sectionToken && r.data.teachers.length === 2, 'teacher step 1 returns section token + 2 teachers', r.data);
-  const sectionToken = r.data.sectionToken;
+  // ---- IT adds a new center: credentials auto-provisioned with the right naming ----
+  r = await api('/centers', { method: 'POST', body: { name: 'Kayole Center', centerCode: 'MOHI-KYL' }, token: itDefaultToken });
+  check(r.status === 201 && r.data.logins.admin.email === 'admin@kayole.mohiafrica.org' && r.data.logins.teacher.email === 'kayole@mohiafrica.org', 'new center gets admin@kayole.mohiafrica.org + kayole@mohiafrica.org automatically', r.data);
+
+  // ---- Teacher one-login-per-center (all sections) ----
+  r = await api('/auth/teacher/login', { method: 'POST', body: { email: 'ndovoini@mohiafrica.org', password: 'Teacher@2026' } });
+  check(r.status === 200 && r.data.pendingToken && r.data.teachers.length === 2, 'teacher step 1 returns pending token + both teachers (any section)', r.data);
+  const pendingToken = r.data.pendingToken;
   const teacherId = r.data.teachers.find(t => t.full_name.includes('Otieno')).id; // Peter Otieno teaches Grade 8 Green / English
 
-  r = await api('/auth/teacher/select', { method: 'POST', body: { sectionToken, teacherId } });
+  r = await api('/auth/teacher/select', { method: 'POST', body: { pendingToken, teacherId } });
   check(r.status === 200 && r.data.token && r.data.teacher.full_name, 'teacher step 2 returns real token', r.data);
   const teacherToken = r.data.token;
 
@@ -150,6 +158,16 @@ async function main() {
   // ---- security: student token cannot list the full roster ----
   r = await api('/students', { token: studentToken });
   check(r.status === 403, 'student token is blocked from GET /students (full roster + parent contacts)', r);
+
+  // ---- CSV bulk uploads ----
+  r = await api('/students/bulk', { method: 'POST', body: { csv: 'Full Name,School ID,Class\nJane Wanjiku,MOHI-0301,Grade 8 Green\nBad Row,,Grade 8 Green' }, token: adminToken });
+  check(r.status === 200 && r.data.added === 1 && r.data.skipped.length === 1, 'bulk student CSV: 1 added, 1 skipped (missing School ID)', r.data);
+
+  r = await api('/teachers/bulk', { method: 'POST', body: { csv: 'Full Name,Section,Class,Subject,Phone\nMs. New Teacher,SENIOR,Grade 10 Silver,Business Studies,0700000000' }, token: adminToken });
+  check(r.status === 200 && r.data.added === 1, 'bulk teacher CSV: 1 teacher added with class+subject linked', r.data);
+
+  r = await api('/marks/bulk', { method: 'POST', body: { examId, csv: 'School ID,Subject,Score\nMOHI-0101,Mathematics,88\nMOHI-0101,English,ME1' }, token: adminToken });
+  check(r.status === 200 && r.data.added === 2, 'bulk whole-school marks CSV: 2 marks applied for Faith Wanjiru', r.data);
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

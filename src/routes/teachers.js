@@ -46,6 +46,59 @@ teachersRouter.post('/', requireRole('admin'), async (req, res) => {
   res.status(201).json(teacher);
 });
 
+// Bulk add via CSV — columns: Full Name, Section, Class, Subject, Phone.
+// Same name on multiple rows merges into one teacher with all those
+// class/subject assignments, so one teacher who teaches several
+// class-subject combos only needs one row per combo, not one row total.
+teachersRouter.post('/bulk', requireRole('admin'), async (req, res) => {
+  const { csv } = req.body;
+  if (!csv || !csv.trim()) return res.status(400).json({ error: 'csv text is required' });
+
+  const [classes, subjects] = await Promise.all([
+    query(`SELECT id, name FROM classes WHERE center_id = $1`, [req.auth.centerId]),
+    query(`SELECT id, name FROM subjects WHERE center_id = $1`, [req.auth.centerId]),
+  ]);
+  const classByName = new Map(classes.rows.map(c => [c.name.toLowerCase(), c.id]));
+  const subjectByName = new Map(subjects.rows.map(s => [s.name.toLowerCase(), s.id]));
+
+  const lines = csv.trim().split(/\r?\n/).map(l => l.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
+  const start = /name/i.test(lines[0]?.[0] || '') ? 1 : 0;
+  let added = 0;
+  const skipped = [];
+  const teacherIdByName = new Map(); // within this upload, so repeated names merge
+
+  for (let i = start; i < lines.length; i++) {
+    const [name, sectionRaw, className, subjectName, phone] = lines[i];
+    if (!name) { skipped.push(`Row ${i + 1}: missing teacher name`); continue; }
+    const section = (sectionRaw || '').trim().toUpperCase();
+    if (!['PRIMARY', 'JUNIOR', 'SENIOR'].includes(section)) {
+      skipped.push(`Row ${i + 1}: section must be PRIMARY, JUNIOR or SENIOR (got "${sectionRaw}")`); continue;
+    }
+    let teacherId = teacherIdByName.get(name.toLowerCase());
+    if (!teacherId) {
+      const existing = await query(`SELECT id FROM teachers WHERE center_id = $1 AND lower(full_name) = lower($2)`, [req.auth.centerId, name.trim()]);
+      if (existing.rows[0]) {
+        teacherId = existing.rows[0].id;
+      } else {
+        const { rows } = await query(
+          `INSERT INTO teachers (center_id, full_name, phone, section) VALUES ($1,$2,$3,$4) RETURNING id`,
+          [req.auth.centerId, name.trim(), (phone || '').trim() || null, section]
+        );
+        teacherId = rows[0].id;
+        added++;
+      }
+      teacherIdByName.set(name.toLowerCase(), teacherId);
+    }
+    const classId = className ? classByName.get(className.trim().toLowerCase()) : null;
+    if (className && !classId) skipped.push(`Row ${i + 1}: class "${className}" not found`);
+    if (classId) await query(`INSERT INTO class_teachers (class_id, teacher_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [classId, teacherId]);
+    const subjectId = subjectName ? subjectByName.get(subjectName.trim().toLowerCase()) : null;
+    if (subjectName && !subjectId) skipped.push(`Row ${i + 1}: subject "${subjectName}" not found`);
+    if (subjectId) await query(`INSERT INTO teacher_subjects (teacher_id, subject_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [teacherId, subjectId]);
+  }
+  res.json({ added, skipped });
+});
+
 teachersRouter.patch('/:id', requireRole('admin'), async (req, res) => {
   const { fullName, phone, bio } = req.body;
   const { rows } = await query(
