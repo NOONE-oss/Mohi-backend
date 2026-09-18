@@ -54,11 +54,30 @@ account of my own.
   always a missing env var — check `DATABASE_URL` and `JWT_SECRET` both show
   under its **Environment** tab (the blueprint should have added them
   automatically).
-- **"relation does not exist" errors when using the app**: step 3's
-  `psql ... -f db/schema.sql` didn't run or failed — rerun it from the Shell tab.
+- **A specific action (e.g. "add a center") returns 500 / 502, especially
+  after you've updated the code once already**: your database still has an
+  older version of the schema — `db/schema.sql` only *creates* tables, it
+  doesn't update ones that already exist with a different shape, so
+  re-running it after a schema change silently does nothing for tables that
+  already exist. Fix it from the Shell tab:
+  ```
+  psql "$DATABASE_URL" -f db/reset.sql
+  psql "$DATABASE_URL" -f db/schema.sql
+  npm run seed
+  ```
+  `reset.sql` drops everything first so the reapply is guaranteed clean —
+  **this deletes all data in the database**, so only run it when you're
+  starting over or don't yet have real students/results entered. If you do
+  have real data and need a schema change without losing it, ask me for a
+  migration instead of running reset.sql.
 - **Free tier sleeps** after inactivity and takes ~30-60s to wake on the next
   visit — expected on the free plan, not a bug. Upgrade the web service's
   plan (a few dollars/month) once this is being used for real, to remove that.
+- **One request failing shouldn't affect anyone else** — every route is
+  wrapped so a database/runtime error returns a normal error response
+  instead of crashing the whole app. If you ever see the *entire* site go
+  down (not just one action failing), that's a different, more serious
+  problem — check the Logs tab and get in touch.
 
 ## What NOT to worry about today
 
