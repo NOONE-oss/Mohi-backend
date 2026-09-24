@@ -104,14 +104,23 @@ Run from a clean checkout, this was verified to work:
 ```bash
 npm install
 cp .env.example .env   # then edit DATABASE_URL / JWT_SECRET
-psql "$DATABASE_URL" -f db/schema.sql
-npm run seed            # creates all 6 named centers + demo data for Ndovoini
 npm run dev
+```
+
+That's it — `npm run dev` sets the database up itself on startup if it's
+empty (schema + demo data), the same way it does when deployed (see
+`src/lib/autoMigrate.js` and `DEPLOYMENT.md`, which covers why this matters
+for Render's free plan specifically). To do it manually instead — useful if you want to reset to a clean slate, or you're
+on a plan/host with Shell access — the standalone scripts still work:
+```bash
+psql "$DATABASE_URL" -f db/reset.sql    # wipes everything (optional)
+psql "$DATABASE_URL" -f db/schema.sql
+npm run seed
 ```
 
 In a second terminal, with the server running:
 ```bash
-npm test    # runs test/integration.js — 33 checks simulating every
+npm test    # runs test/integration.js — 38 checks simulating every
             # frontend flow call-for-call against the real running server
 ```
 

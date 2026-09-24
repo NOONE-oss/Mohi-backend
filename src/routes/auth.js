@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query } from '../lib/db.js';
 import { hashPassword, verifyPassword, signToken, verifyToken } from '../lib/auth.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 export const authRouter = Router();
 
@@ -13,7 +14,7 @@ export const authRouter = Router();
 //                    that. It lands on its most-recently-added center by
 //                    default, and switches centers from inside the dashboard
 //                    via /admin/switch-center (see the center switcher there).
-authRouter.post('/admin/login', async (req, res) => {
+authRouter.post('/admin/login', asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
 
@@ -36,12 +37,12 @@ authRouter.post('/admin/login', async (req, res) => {
 
   const token = signToken({ sub: admin.id, role: 'admin', centerId: admin.center_id });
   res.json({ token, admin: { id: admin.id, name: admin.full_name, centerId: admin.center_id } });
-});
+}));
 
 // IT support: switch to a different center mid-session without logging out again.
 // Requires an already-valid it_support token (so this can't be used to escalate
 // a school_admin token into cross-center access).
-authRouter.post('/admin/switch-center', async (req, res) => {
+authRouter.post('/admin/switch-center', asyncHandler(async (req, res) => {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   const { centerId } = req.body;
@@ -60,14 +61,14 @@ authRouter.post('/admin/switch-center', async (req, res) => {
 
   const newToken = signToken({ sub: claims.sub, role: 'it_support', centerId });
   res.json({ token: newToken, center: center.rows[0] });
-});
+}));
 
 // ---------- TEACHER (one shared login per center, all sections) ----------
 // Step 1: verify the center's one shared credential (e.g. babadogo@mohiafrica.org),
 // return every teacher at that center so the client can render "which teacher
 // are you?" — the section itself comes from the teacher record they pick next,
 // not from the login.
-authRouter.post('/teacher/login', async (req, res) => {
+authRouter.post('/teacher/login', asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
 
@@ -90,10 +91,10 @@ authRouter.post('/teacher/login', async (req, res) => {
   // step 2 picks a specific person.
   const pendingToken = signToken({ role: 'teacher_pending', centerId: login.center_id });
   res.json({ pendingToken, teachers: teachers.rows });
-});
+}));
 
 // Step 2: pick a specific teacher, get a real, usable token.
-authRouter.post('/teacher/select', async (req, res) => {
+authRouter.post('/teacher/select', asyncHandler(async (req, res) => {
   const { pendingToken, teacherId } = req.body;
   if (!pendingToken || !teacherId) return res.status(400).json({ error: 'pendingToken and teacherId are required' });
 
@@ -115,12 +116,12 @@ authRouter.post('/teacher/select', async (req, res) => {
     sub: teacherId, role: 'teacher', centerId: claims.centerId, section: rows[0].section,
   });
   res.json({ token, teacher: rows[0] });
-});
+}));
 
 // ---------- STUDENT / PARENT ----------
 // School ID Number is unique ORG-WIDE (see design doc Section 3), so this
 // intentionally does not filter by center — the lookup itself tells us the center.
-authRouter.post('/student/login', async (req, res) => {
+authRouter.post('/student/login', asyncHandler(async (req, res) => {
   const { schoolIdNumber, password } = req.body;
   if (!schoolIdNumber || !password) return res.status(400).json({ error: 'schoolIdNumber and password are required' });
 
@@ -141,9 +142,9 @@ authRouter.post('/student/login', async (req, res) => {
 
   const token = signToken({ sub: student.id, role: 'student', centerId: student.center_id });
   res.json({ token, student: { id: student.id, name: student.full_name } });
-});
+}));
 
-authRouter.post('/student/set-password', async (req, res) => {
+authRouter.post('/student/set-password', asyncHandler(async (req, res) => {
   const { resetToken, newPassword } = req.body;
   if (!resetToken || !newPassword) return res.status(400).json({ error: 'resetToken and newPassword are required' });
   if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
@@ -163,4 +164,4 @@ authRouter.post('/student/set-password', async (req, res) => {
   );
   const token = signToken({ sub: claims.sub, role: 'student', centerId: claims.centerId });
   res.json({ token });
-});
+}));

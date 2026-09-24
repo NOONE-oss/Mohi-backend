@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { query } from '../lib/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 export const classesRouter = Router();
 classesRouter.use(requireAuth);
 
 // List — any authenticated role at this center can read the class list.
-classesRouter.get('/', async (req, res) => {
+classesRouter.get('/', asyncHandler(async (req, res) => {
   const { rows } = await query(
     `SELECT c.*, t.full_name AS class_teacher_name
      FROM classes c
@@ -16,9 +17,9 @@ classesRouter.get('/', async (req, res) => {
     [req.auth.centerId]
   );
   res.json(rows);
-});
+}));
 
-classesRouter.post('/', requireRole('admin'), async (req, res) => {
+classesRouter.post('/', requireRole('admin'), asyncHandler(async (req, res) => {
   const { name, grade, stream, section, academicYear } = req.body;
   if (!name || !grade || !section) return res.status(400).json({ error: 'name, grade and section are required' });
 
@@ -28,9 +29,9 @@ classesRouter.post('/', requireRole('admin'), async (req, res) => {
     [req.auth.centerId, name, grade, stream || null, section, academicYear || null]
   );
   res.status(201).json(rows[0]);
-});
+}));
 
-classesRouter.patch('/:id/class-teacher', requireRole('admin'), async (req, res) => {
+classesRouter.patch('/:id/class-teacher', requireRole('admin'), asyncHandler(async (req, res) => {
   const { teacherId } = req.body;
   // Ownership check: the class AND the teacher must both belong to this center,
   // otherwise an admin at Center A could point a class at a teacher from Center B.
@@ -44,10 +45,10 @@ classesRouter.patch('/:id/class-teacher', requireRole('admin'), async (req, res)
   );
   if (!rows[0]) return res.status(404).json({ error: 'Class not found' });
   res.json(rows[0]);
-});
+}));
 
-classesRouter.delete('/:id', requireRole('admin'), async (req, res) => {
+classesRouter.delete('/:id', requireRole('admin'), asyncHandler(async (req, res) => {
   const { rowCount } = await query(`DELETE FROM classes WHERE id = $1 AND center_id = $2`, [req.params.id, req.auth.centerId]);
   if (!rowCount) return res.status(404).json({ error: 'Class not found' });
   res.status(204).end();
-});
+}));

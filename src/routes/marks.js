@@ -2,13 +2,14 @@ import { Router } from 'express';
 import { query } from '../lib/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { SUBLEVEL_POINTS, isValidSublevel, percentToSublevel } from '../lib/grading.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 export const marksRouter = Router();
 marksRouter.use(requireAuth);
 
 // Grid data for a teacher's mark-entry screen: every student in a class,
 // with their existing mark (if any) for one subject/exam.
-marksRouter.get('/', requireRole('teacher', 'admin'), async (req, res) => {
+marksRouter.get('/', requireRole('teacher', 'admin'), asyncHandler(async (req, res) => {
   const { examId, classId, subjectId } = req.query;
   if (!examId || !classId || !subjectId) return res.status(400).json({ error: 'examId, classId and subjectId are required' });
 
@@ -21,13 +22,13 @@ marksRouter.get('/', requireRole('teacher', 'admin'), async (req, res) => {
     [examId, subjectId, classId, req.auth.centerId]
   );
   res.json(rows);
-});
+}));
 
 // Enter or edit one student's mark for one subject/exam.
 // Mirrors the prototype's setMark()/handleMarkChange() approval gating exactly:
 // editing a mark that already exists on a PUBLISHED exam queues an edit_request
 // for admin approval instead of applying immediately.
-marksRouter.put('/', requireRole('teacher', 'admin'), async (req, res) => {
+marksRouter.put('/', requireRole('teacher', 'admin'), asyncHandler(async (req, res) => {
   const { examId, studentId, subjectId } = req.body;
   let { sublevel, percent } = req.body;
   if (!examId || !studentId || !subjectId) {
@@ -79,12 +80,12 @@ marksRouter.put('/', requireRole('teacher', 'admin'), async (req, res) => {
     [examId, studentId, subjectId, sublevel, points, percent, teacherId]
   );
   res.json({ queued: false, mark: rows[0] });
-});
+}));
 
 // Clear a mark entirely (teacher picks "— Not graded —"). Same ownership
 // checks as PUT, and the same approval gate: clearing a mark on a published
 // exam queues a request instead of deleting outright.
-marksRouter.delete('/', requireRole('teacher', 'admin'), async (req, res) => {
+marksRouter.delete('/', requireRole('teacher', 'admin'), asyncHandler(async (req, res) => {
   const { examId, studentId, subjectId } = req.query;
   if (!examId || !studentId || !subjectId) {
     return res.status(400).json({ error: 'examId, studentId and subjectId are required' });
@@ -109,7 +110,7 @@ marksRouter.delete('/', requireRole('teacher', 'admin'), async (req, res) => {
 
   await query(`DELETE FROM marks WHERE exam_id = $1 AND student_id = $2 AND subject_id = $3`, [examId, studentId, subjectId]);
   res.status(204).end();
-});
+}));
 
 // Whole-school bulk upload for one exam — admin only. Columns: School ID,
 // Subject, Score (a CBC sub-level OR a 0-100 percentage). Every student's
@@ -117,7 +118,7 @@ marksRouter.delete('/', requireRole('teacher', 'admin'), async (req, res) => {
 // once instead of teachers entering marks one class/subject at a time.
 // Applies directly even on a published exam — this is an explicit admin bulk
 // action, not a teacher edit, so it doesn't go through the approval queue.
-marksRouter.post('/bulk', requireRole('admin'), async (req, res) => {
+marksRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res) => {
   const { examId, csv } = req.body;
   if (!examId || !csv || !csv.trim()) return res.status(400).json({ error: 'examId and csv text are required' });
 
@@ -163,4 +164,4 @@ marksRouter.post('/bulk', requireRole('admin'), async (req, res) => {
     added++;
   }
   res.json({ added, skipped });
-});
+}));

@@ -2,12 +2,13 @@ import { Router } from 'express';
 import { query, pool } from '../lib/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { SUBLEVEL_POINTS } from '../lib/grading.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 export const editRequestsRouter = Router();
 editRequestsRouter.use(requireAuth);
 
 // Student/admin submits a name or School ID change — queued, never applied directly.
-editRequestsRouter.post('/student-edit', requireRole('admin'), async (req, res) => {
+editRequestsRouter.post('/student-edit', requireRole('admin'), asyncHandler(async (req, res) => {
   const { studentId, field, newValue } = req.body; // field: 'name' | 'schoolId'
   if (!studentId || !field || !newValue) return res.status(400).json({ error: 'studentId, field and newValue are required' });
   if (!['name', 'schoolId'].includes(field)) return res.status(400).json({ error: 'field must be "name" or "schoolId"' });
@@ -30,18 +31,18 @@ editRequestsRouter.post('/student-edit', requireRole('admin'), async (req, res) 
     [req.auth.centerId, type, label, oldValue, newValue.trim(), studentId]
   );
   res.status(201).json(rows[0]);
-});
+}));
 
-editRequestsRouter.get('/', requireRole('admin'), async (req, res) => {
+editRequestsRouter.get('/', requireRole('admin'), asyncHandler(async (req, res) => {
   const { status } = req.query; // pending | approved | rejected | (omit for all)
   const { rows } = await query(
     `SELECT * FROM edit_requests WHERE center_id = $1 ${status ? 'AND status = $2' : ''} ORDER BY requested_at DESC`,
     status ? [req.auth.centerId, status.toUpperCase()] : [req.auth.centerId]
   );
   res.json(rows);
-});
+}));
 
-editRequestsRouter.post('/:id/approve', requireRole('admin'), async (req, res) => {
+editRequestsRouter.post('/:id/approve', requireRole('admin'), asyncHandler(async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -84,9 +85,9 @@ editRequestsRouter.post('/:id/approve', requireRole('admin'), async (req, res) =
   } finally {
     client.release();
   }
-});
+}));
 
-editRequestsRouter.post('/:id/reject', requireRole('admin'), async (req, res) => {
+editRequestsRouter.post('/:id/reject', requireRole('admin'), asyncHandler(async (req, res) => {
   const { rows } = await query(
     `UPDATE edit_requests SET status = 'REJECTED', resolved_by_admin_id = $1, resolved_at = now()
      WHERE id = $2 AND center_id = $3 AND status = 'PENDING' RETURNING *`,
@@ -94,4 +95,4 @@ editRequestsRouter.post('/:id/reject', requireRole('admin'), async (req, res) =>
   );
   if (!rows[0]) return res.status(404).json({ error: 'Pending request not found' });
   res.json({ rejected: true });
-});
+}));
