@@ -565,8 +565,8 @@
         <circle cx="100" cy="100" r="4" fill="#fff" opacity="0.9"/>
       </svg>
       <div class="tagline">
-        <h2>Every learner, every center</h2>
-        <p>One results system for every Missions of Hope International center — exam entry, grading and report cards, built for how our centers actually work. Starting with Ndovoini Center; more centers join the same system as they're onboarded.</p>
+        <h2>Mohi Results System</h2>
+        <p>Exam entry. Grading. Report cards. One system for every center.</p>
       </div>
     </div>
     <div class="login-panel">
@@ -581,10 +581,10 @@
 
         <div id="adminLogin">
           <h2>Admin sign in</h2>
-          <p class="sub">School admin, or IT support (picks a center next).</p>
+          <p class="sub">School admin.</p>
           <div id="adminError"></div>
           <label for="adminEmail">Admin email</label>
-          <input type="text" id="adminEmail" placeholder="admin@ndovoini.mohiafrica.org">
+          <input type="text" id="adminEmail" placeholder="admin@school">
           <label for="adminPass">Password</label>
           <div class="pw-wrap"><input type="password" id="adminPass"><button type="button" class="pw-toggle" onclick="togglePw('adminPass',this)">Show</button></div>
           <button class="btn" onclick="loginAdmin()">Sign in</button>
@@ -593,10 +593,10 @@
 
         <div id="teacherLogin" style="display:none;">
           <h2>Teacher sign in</h2>
-          <p class="sub">Shared staff login — you'll pick your name next.</p>
+          <p class="sub">you'll pick your name next.</p>
           <div id="teacherError"></div>
           <label for="teacherEmail">Staff email</label>
-          <input type="text" id="teacherEmail" placeholder="ndovoini@mohiafrica.org">
+          <input type="text" id="teacherEmail" placeholder="center@mohiafrica.org">
           <label for="teacherPass">Password</label>
           <div class="pw-wrap"><input type="password" id="teacherPass"><button type="button" class="pw-toggle" onclick="togglePw('teacherPass',this)">Show</button></div>
           <button class="btn" onclick="loginTeacher()">Sign in</button>
@@ -605,9 +605,9 @@
 
         <div id="studentLogin" style="display:none;">
           <h2>Student &amp; Parent sign in</h2>
-          <p class="sub">Use the student's School ID Number.</p>
+          <p class="sub">Use the student's School CIN Number.</p>
           <div id="studentError"></div>
-          <label for="schoolId">School ID number</label>
+          <label for="schoolId">School CIN number</label>
           <input type="text" id="schoolId" placeholder="e.g. MOHI-0101">
           <label for="studentPass">Password</label>
           <div class="pw-wrap"><input type="password" id="studentPass"><button type="button" class="pw-toggle" onclick="togglePw('studentPass',this)">Show</button></div>
