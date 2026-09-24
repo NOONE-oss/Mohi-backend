@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { query } from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { pointsToLevel } from '../lib/grading.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 export const reportCardRouter = Router();
 reportCardRouter.use(requireAuth);
@@ -53,7 +54,7 @@ async function computeStudentExam(centerId, studentId, examId) {
 }
 
 // One exam's full report card.
-reportCardRouter.get('/:studentId', async (req, res) => {
+reportCardRouter.get('/:studentId', asyncHandler(async (req, res) => {
   const { studentId } = req.params;
   const { examId } = req.query;
   if (req.auth.role === 'student' && req.auth.sub !== studentId) {
@@ -70,10 +71,10 @@ reportCardRouter.get('/:studentId', async (req, res) => {
   const data = await computeStudentExam(req.auth.centerId, studentId, examId);
   if (!data) return res.status(404).json({ error: 'Student not found' });
   res.json({ exam: exam.rows[0], ...data });
-});
+}));
 
 // Term-over-term trend across every published exam the student has marks for.
-reportCardRouter.get('/:studentId/trend', async (req, res) => {
+reportCardRouter.get('/:studentId/trend', asyncHandler(async (req, res) => {
   const { studentId } = req.params;
   if (req.auth.role === 'student' && req.auth.sub !== studentId) {
     return res.status(403).json({ error: "You can only view your own trend" });
@@ -92,4 +93,4 @@ reportCardRouter.get('/:studentId/trend', async (req, res) => {
     }
   }
   res.json(trend);
-});
+}));

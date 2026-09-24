@@ -6,7 +6,11 @@ import { SUBLEVEL_POINTS } from '../lib/grading.js';
 // list to pick from, with no chance of code collisions as more are added),
 // with Ndovoini fleshed out with full demo data — the same shape as the HTML
 // prototype, so behavior can be compared side by side.
-async function seed() {
+//
+// Exported so autoMigrate.js can call this directly on first boot (Render's
+// free plan has no Shell access to run `npm run seed` by hand) — this
+// function itself never closes the pool, only the CLI entry point below does.
+export async function seed() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -149,8 +153,15 @@ async function seed() {
     throw err;
   } finally {
     client.release();
-    await pool.end();
   }
 }
 
-seed().catch((err) => { console.error(err); process.exit(1); });
+// CLI entry point (`npm run seed`) — only this path closes the pool, since
+// closing it would break the server if seed() is instead called from
+// autoMigrate.js while the app is running.
+const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+if (isMain) {
+  seed()
+    .then(() => pool.end())
+    .catch((err) => { console.error(err); process.exit(1); });
+}

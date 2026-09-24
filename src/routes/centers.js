@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { query } from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { hashPassword } from '../lib/auth.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 export const centersRouter = Router();
 centersRouter.use(requireAuth);
@@ -18,14 +19,14 @@ function slugify(name) {
 // they still can't query another center's classes/students/etc. even if they
 // somehow learned its id, since every other route filters by req.auth.centerId,
 // which a school_admin's token can't change.
-centersRouter.get('/', async (req, res) => {
+centersRouter.get('/', asyncHandler(async (req, res) => {
   if (req.auth.role === 'it_support') {
     const { rows } = await query(`SELECT * FROM centers ORDER BY name`);
     return res.json(rows);
   }
   const { rows } = await query(`SELECT * FROM centers WHERE id = $1`, [req.auth.centerId]);
   res.json(rows);
-});
+}));
 
 // Only IT support onboards new centers — this is deliberately not exposed to
 // requireRole('admin'), so a school_admin can never create a center (which
@@ -42,7 +43,7 @@ const DEFAULT_TEACHER_PASSWORD = 'Teacher@2026';
 centersRouter.post('/', (req, res, next) => {
   if (req.auth.role !== 'it_support') return res.status(403).json({ error: 'Only IT support can add centers' });
   next();
-}, async (req, res) => {
+}, asyncHandler(async (req, res) => {
   const { name, centerCode, location } = req.body;
   if (!name || !centerCode) return res.status(400).json({ error: 'name and centerCode are required' });
 
@@ -77,14 +78,14 @@ centersRouter.post('/', (req, res, next) => {
       teacher: { email: teacherEmail, password: DEFAULT_TEACHER_PASSWORD },
     },
   });
-});
+}));
 
 centersRouter.patch('/:id/active', (req, res, next) => {
   if (req.auth.role !== 'it_support') return res.status(403).json({ error: 'Only IT support can do this' });
   next();
-}, async (req, res) => {
+}, asyncHandler(async (req, res) => {
   const { isActive } = req.body;
   const { rows } = await query(`UPDATE centers SET is_active = $1 WHERE id = $2 RETURNING *`, [!!isActive, req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'Center not found' });
   res.json(rows[0]);
-});
+}));

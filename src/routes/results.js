@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { query } from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { pointsToLevel } from '../lib/grading.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 export const resultsRouter = Router();
 resultsRouter.use(requireAuth);
@@ -9,7 +10,7 @@ resultsRouter.use(requireAuth);
 // Computes, for every student in a class/exam: per-subject marks, mean points,
 // mean grade, and class position — same logic as computeClassResults() in the
 // prototype, just running as a real query instead of client-side JS.
-resultsRouter.get('/', async (req, res) => {
+resultsRouter.get('/', asyncHandler(async (req, res) => {
   const { examId, classId } = req.query;
   if (!examId || !classId) return res.status(400).json({ error: 'examId and classId are required' });
 
@@ -57,4 +58,4 @@ resultsRouter.get('/', async (req, res) => {
 
   rows.sort((a, b) => (a.position || 999) - (b.position || 999) || a.student.full_name.localeCompare(b.student.full_name));
   res.json(rows);
-});
+}));

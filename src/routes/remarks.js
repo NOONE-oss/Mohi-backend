@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { query } from '../lib/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 export const remarksRouter = Router();
 remarksRouter.use(requireAuth);
 
 // Existing remarks for a class/exam, so the teacher's comment grid can be
 // pre-filled instead of always starting blank.
-remarksRouter.get('/', requireRole('teacher', 'admin'), async (req, res) => {
+remarksRouter.get('/', requireRole('teacher', 'admin'), asyncHandler(async (req, res) => {
   const { examId, classId } = req.query;
   if (!examId || !classId) return res.status(400).json({ error: 'examId and classId are required' });
 
@@ -21,9 +22,9 @@ remarksRouter.get('/', requireRole('teacher', 'admin'), async (req, res) => {
     [examId, classId]
   );
   res.json(rows);
-});
+}));
 
-remarksRouter.put('/', requireRole('teacher', 'admin'), async (req, res) => {
+remarksRouter.put('/', requireRole('teacher', 'admin'), asyncHandler(async (req, res) => {
   const { examId, studentId, text } = req.body;
   if (!examId || !studentId) return res.status(400).json({ error: 'examId and studentId are required' });
 
@@ -45,4 +46,4 @@ remarksRouter.put('/', requireRole('teacher', 'admin'), async (req, res) => {
     [examId, studentId, trimmed, teacherId]
   );
   res.json(rows[0]);
-});
+}));

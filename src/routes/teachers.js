@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { query } from '../lib/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 export const teachersRouter = Router();
 teachersRouter.use(requireAuth);
 
-teachersRouter.get('/', async (req, res) => {
+teachersRouter.get('/', asyncHandler(async (req, res) => {
   const { rows } = await query(
     `SELECT t.*,
        COALESCE(json_agg(DISTINCT c.id) FILTER (WHERE c.id IS NOT NULL), '[]') AS class_ids,
@@ -21,9 +22,9 @@ teachersRouter.get('/', async (req, res) => {
     [req.auth.centerId]
   );
   res.json(rows);
-});
+}));
 
-teachersRouter.post('/', requireRole('admin'), async (req, res) => {
+teachersRouter.post('/', requireRole('admin'), asyncHandler(async (req, res) => {
   const { fullName, phone, bio, section, classId, subjectId } = req.body;
   if (!fullName || !section) return res.status(400).json({ error: 'fullName and section are required' });
 
@@ -44,13 +45,13 @@ teachersRouter.post('/', requireRole('admin'), async (req, res) => {
                  ON CONFLICT DO NOTHING`, [teacher.id, subjectId, req.auth.centerId]);
   }
   res.status(201).json(teacher);
-});
+}));
 
 // Bulk add via CSV — columns: Full Name, Section, Class, Subject, Phone.
 // Same name on multiple rows merges into one teacher with all those
 // class/subject assignments, so one teacher who teaches several
 // class-subject combos only needs one row per combo, not one row total.
-teachersRouter.post('/bulk', requireRole('admin'), async (req, res) => {
+teachersRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res) => {
   const { csv } = req.body;
   if (!csv || !csv.trim()) return res.status(400).json({ error: 'csv text is required' });
 
@@ -97,9 +98,9 @@ teachersRouter.post('/bulk', requireRole('admin'), async (req, res) => {
     if (subjectId) await query(`INSERT INTO teacher_subjects (teacher_id, subject_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [teacherId, subjectId]);
   }
   res.json({ added, skipped });
-});
+}));
 
-teachersRouter.patch('/:id', requireRole('admin'), async (req, res) => {
+teachersRouter.patch('/:id', requireRole('admin'), asyncHandler(async (req, res) => {
   const { fullName, phone, bio } = req.body;
   const { rows } = await query(
     `UPDATE teachers SET full_name = COALESCE($1, full_name), phone = $2, bio = $3
@@ -108,10 +109,10 @@ teachersRouter.patch('/:id', requireRole('admin'), async (req, res) => {
   );
   if (!rows[0]) return res.status(404).json({ error: 'Teacher not found' });
   res.json(rows[0]);
-});
+}));
 
-teachersRouter.delete('/:id', requireRole('admin'), async (req, res) => {
+teachersRouter.delete('/:id', requireRole('admin'), asyncHandler(async (req, res) => {
   const { rowCount } = await query(`DELETE FROM teachers WHERE id = $1 AND center_id = $2`, [req.params.id, req.auth.centerId]);
   if (!rowCount) return res.status(404).json({ error: 'Teacher not found' });
   res.status(204).end();
-});
+}));

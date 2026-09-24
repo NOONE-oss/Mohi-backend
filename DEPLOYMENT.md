@@ -23,17 +23,14 @@ account of my own.
    - Wait for both to go green ("Live" / "Available"). Render gives you a URL
      like `https://mohi-results-xyz.onrender.com` — **that's your site.**
 
-**3. Load the database schema + demo data** (2 min, one-time):
-   - On the web service's page in Render, open the **Shell** tab (top right).
-   - Run:
-     ```
-     psql "$DATABASE_URL" -f db/schema.sql
-     npm run seed
-     ```
-   - That's it — visit your Render URL, log in with the seeded demo accounts
-     (see below), and start replacing the demo data with Ndovoini's real
-     classes/teachers/students through the app itself (Admin → Classes/
-     Teachers/Students — no more shell commands needed after this).
+**3. That's it — the database sets itself up.** The app checks for its
+   database tables on every startup and creates + seeds them automatically
+   if they're missing (see `src/lib/autoMigrate.js`) — no Shell tab, no
+   manual commands. This matters because **Render's free plan doesn't
+   include Shell access at all** (it's a paid-plan feature), so this is the
+   only way a free-tier deploy can work. It only ever seeds an empty
+   database — once real data exists, every future restart or redeploy
+   leaves it untouched.
 
 **4. Open it**: `https://mohi-results-xyz.onrender.com` in Chrome. Log in as
    admin, start entering real classes/teachers/students, and you're usable
@@ -54,11 +51,33 @@ account of my own.
   always a missing env var — check `DATABASE_URL` and `JWT_SECRET` both show
   under its **Environment** tab (the blueprint should have added them
   automatically).
-- **"relation does not exist" errors when using the app**: step 3's
-  `psql ... -f db/schema.sql` didn't run or failed — rerun it from the Shell tab.
+- **A specific action (e.g. "add a center") returns 500 / 502, especially
+  after you've updated the code once already**: your database still has an
+  older version of the schema — reapplying `db/schema.sql` only *creates*
+  tables, it doesn't update ones that already exist with a different shape.
+  Since Shell access isn't available on the free plan, fix this from
+  Render's dashboard instead (no commands needed):
+  1. Open your **PostgreSQL database** in Render (not the web service).
+  2. **Settings** → scroll down → **Delete Database**, confirm.
+  3. **New + → PostgreSQL**, same name as before, create it.
+  4. On the **web service** → **Environment** tab, update `DATABASE_URL` to
+     the new database's Internal Database URL, save.
+  5. The web service restarts automatically and — since the new database is
+     empty — sets itself up from scratch on that restart (see step 3 above).
+  **This deletes all data**, so only do this when starting over or before
+  real students/results are entered. If you have real data and need a
+  schema change without losing it, ask me for a migration instead.
 - **Free tier sleeps** after inactivity and takes ~30-60s to wake on the next
   visit — expected on the free plan, not a bug. Upgrade the web service's
   plan (a few dollars/month) once this is being used for real, to remove that.
+- **One request failing shouldn't affect anyone else** — every route is
+  wrapped so a database/runtime error returns a normal error response
+  instead of crashing the whole app. If you ever see the *entire* site go
+  down (not just one action failing), that's a different, more serious
+  problem — check the Logs tab and get in touch.
+- **`db/reset.sql` and `npm run seed` still exist** as standalone scripts for
+  anyone who *does* have Shell access (a paid plan) or is running this
+  locally — they're just no longer required for a free-tier Render deploy.
 
 ## What NOT to worry about today
 

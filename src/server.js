@@ -16,8 +16,24 @@ import { remarksRouter } from './routes/remarks.js';
 import { resultsRouter } from './routes/results.js';
 import { editRequestsRouter } from './routes/editRequests.js';
 import { reportCardRouter } from './routes/reportCard.js';
+import { ensureSchema } from './lib/autoMigrate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Safety net: an error thrown inside an async Express route handler that
+// isn't wrapped (see lib/asyncHandler.js — every route below is wrapped, but
+// this is a second line of defense for anything that slips through, now or
+// in a future change) becomes an "unhandled rejection." In Node, that can
+// terminate the entire process by default — turning one bad request into
+// total downtime (a 502) for every user until the platform restarts it.
+// Logging it here instead keeps the process, and everyone else's requests,
+// alive.
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection (recovered, process kept running):', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception (recovered, process kept running):', err);
+});
 
 const app = express();
 app.use(cors());
@@ -50,4 +66,15 @@ app.use((err, req, res, next) => {
 });
 
 const port = process.env.PORT || 3001;
-app.listen(port, () => console.log(`MOHI backend listening on :${port}`));
+
+// Set up the database automatically before accepting any requests — see
+// lib/autoMigrate.js. This is what lets the app work on Render's free plan,
+// which has no Shell access to run migration/seed commands by hand.
+ensureSchema()
+  .then(() => {
+    app.listen(port, () => console.log(`MOHI backend listening on :${port}`));
+  })
+  .catch((err) => {
+    console.error('Failed to set up the database on startup:', err);
+    process.exit(1);
+  });

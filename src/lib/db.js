@@ -3,7 +3,6 @@ import 'dotenv/config';
 
 export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
 });
 
 // Thin query helper. Deliberately NOT an ORM: for a system whose central
