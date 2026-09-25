@@ -624,16 +624,15 @@
 
   <!-- ADMIN SHELL -->
   <div id="adminShell" class="app-shell">
-    <div class="it-strip no-print" id="itStrip" style="display:none;">
-      <span>
-        Switch center:
-        <select id="itSwitchSelect" onchange="handleItSwitch(this.value)"></select>
-      </span>
-    </div>
     <div class="shell-row" style="display:flex; flex:1; min-height:0;">
       <div class="sidebar">
         <div class="sidebar-brand"><img id="sidebarBrandLogo" src="" alt="School logo"><span class="name" id="sidebarCenterName">Ndovoini Center<br>Missions of Hope Intl.</span></div>
         <button class="nav-item active" data-view="overview"><span class="n">01</span> Overview</button>
+        <div class="it-strip no-print" id="itStrip" style="display:none; padding:8px; margin-bottom:8px;">
+  <span style="font-size:0.75rem; color:var(--text-soft);">Switch center:
+    <select id="itSwitchSelect" onchange="handleItSwitch(this.value)" style="width:100%; margin-top:4px;"></select>
+  </span>
+</div>
         <button class="nav-item" data-view="centers"><span class="n">02</span> Centers</button>
         <button class="nav-item" data-view="classes"><span class="n">03</span> Classes</button>
         <button class="nav-item" data-view="subjects"><span class="n">04</span> Subjects</button>
@@ -1033,9 +1032,6 @@ async function renderOverview(main){
     </div>
     <div class="placeholder-box">
       <div class="tagline">${isItSupport ? 'IT support session' : 'School admin session'}</div>
-      ${isItSupport
-        ? 'Use the center switcher above to move between centers. Every screen below reflects whichever center is currently selected.'
-        : 'This view only ever shows Ndovoini Center\'s own data — the server enforces that from your login token, not from anything chosen in this browser.'}
     </div>
   `;
 }
