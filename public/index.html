@@ -409,10 +409,12 @@
   .top-welcome .who{font-size:0.85rem; color:var(--text-soft);}
   select#teacherSelectName{margin-bottom:16px;}
   @media (max-width: 720px){
-    .app-shell.visible{flex-direction:column;}
-    .sidebar{width:100%; display:flex; overflow-x:auto; gap:4px;}
-    .sidebar .logout{margin-top:0;}
-    .main{padding:22px 18px;}
+  .app-shell.visible{flex-direction:column;}
+  .shell-row{flex-direction:column;}
+  .sidebar{width:100%; display:flex; flex-direction:row; overflow-x:auto; overflow-y:hidden; gap:4px;}
+  .sidebar button.nav-item{width:auto; flex-shrink:0; white-space:nowrap;}
+  .sidebar .logout{margin-top:0;}
+  .main{padding:22px 18px;}
   }
 
   /* ---------- EXAMS / PUBLISH STATUS ---------- */
@@ -629,7 +631,7 @@
         <select id="itSwitchSelect" onchange="handleItSwitch(this.value)"></select>
       </span>
     </div>
-    <div style="display:flex; flex:1; min-height:0;">
+    <div class="shell-row" style="display:flex; flex:1; min-height:0;">
       <div class="sidebar">
         <div class="sidebar-brand"><img id="sidebarBrandLogo" src="" alt="School logo"><span class="name" id="sidebarCenterName">Ndovoini Center<br>Missions of Hope Intl.</span></div>
         <button class="nav-item active" data-view="overview"><span class="n">01</span> Overview</button>
