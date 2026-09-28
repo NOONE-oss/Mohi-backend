@@ -23,8 +23,20 @@
     --error:#B24444;
     --text:#1A2233;
     --text-soft:#5B6478;
-    --line:#DADFE2;
+        --line:#DADFE2;
     --radius:10px;
+    --accent-blue:#4a90e2;
+    --accent-orange:#e2984a;
+    --accent-purple:#8a6fe2;
+    --accent-green:#4ac97a;
+  }
+  body.dark-theme{
+    --ink-navy:#151b2e;
+    --paper:#0d1420;
+    --paper-raised:#151b2e;
+    --line:rgba(255,255,255,0.08);
+    --text:#e8ebf2;
+    --text-soft:#8a93a8;
   }
   *{box-sizing:border-box;}
   body{
@@ -239,12 +251,15 @@
   /* ---------- APP SHELL ---------- */
   .app-shell{display:none;}
   .app-shell.visible{display:flex; min-height:calc(100vh - 88px);}
-  .sidebar{
+    .sidebar{
     width:220px;
     background:var(--ink-navy);
     padding:20px 14px;
     flex-shrink:0;
+    display:flex;
+    flex-direction:column;
   }
+  
   .sidebar-brand{
     display:flex; align-items:center; gap:10px;
     padding:2px 8px 18px; margin-bottom:10px;
@@ -279,6 +294,18 @@
   .sidebar button.nav-item:hover{background:var(--ink-navy-2);color:#fff;}
   .sidebar button.nav-item.active{background:var(--brand-blue-deep);color:#fff;font-weight:600;}
   .sidebar button.nav-item.active .n{color:#DCE6F7;}
+  .sidebar button.nav-item .ic{flex-shrink:0;}
+  .theme-toggle{
+    position:fixed; bottom:16px; left:16px; z-index:50;
+    background:var(--ink-navy); border:1px solid var(--line); color:#fff;
+    border-radius:20px; padding:8px 14px; font-size:0.8rem; cursor:pointer;
+    display:flex; align-items:center; gap:6px;
+  }
+  body.dark-theme .theme-toggle{color:#e8ebf2;}
+  .stats-accent .stat:nth-child(1){border-bottom:3px solid var(--accent-blue);}
+  .stats-accent .stat:nth-child(2){border-bottom:3px solid var(--accent-orange);}
+  .stats-accent .stat:nth-child(3){border-bottom:3px solid var(--accent-purple);}
+  .stats-accent .stat:nth-child(4){border-bottom:3px solid var(--accent-green);}
   .sidebar .logout{
     margin-top:24px;
     color:#E7B8B8;
@@ -623,24 +650,24 @@
   </div>
 
   <!-- ADMIN SHELL -->
-  <div id="adminShell" class="app-shell">
-    <div class="shell-row" style="display:flex; flex:1; min-height:0;">
-      <div class="sidebar">
-        <div class="sidebar-brand"><img id="sidebarBrandLogo" src="" alt="School logo"><span class="name" id="sidebarCenterName">Ndovoini Center<br>Missions of Hope Intl.</span></div>
-        <button class="nav-item active" data-view="overview"><span class="n">01</span> Overview</button>
-        <div class="it-strip no-print" id="itStrip" style="display:none; padding:8px; margin-bottom:8px;">
+ <div id="adminShell" class="app-shell">
+  <div class="it-strip no-print" id="itStrip" style="display:none; padding:8px; margin-bottom:8px;">
   <span style="font-size:0.75rem; color:var(--text-soft);">Switch center:
     <select id="itSwitchSelect" onchange="handleItSwitch(this.value)" style="width:100%; margin-top:4px;"></select>
   </span>
-</div>
-        <button class="nav-item" data-view="centers"><span class="n">02</span> Centers</button>
-        <button class="nav-item" data-view="classes"><span class="n">03</span> Classes</button>
-        <button class="nav-item" data-view="subjects"><span class="n">04</span> Subjects</button>
-        <button class="nav-item" data-view="teachers"><span class="n">05</span> Teachers</button>
-        <button class="nav-item" data-view="students"><span class="n">06</span> Students</button>
-        <button class="nav-item" data-view="exams"><span class="n">07</span> Exams</button>
-        <button class="nav-item" data-view="results"><span class="n">08</span> Results</button>
-        <button class="nav-item" data-view="notifications"><span class="n">09</span> Notifications<span id="pendingBadge"></span></button>
+  </div>
+  <div class="shell-row" style="display:flex; flex:1; min-height:0;">
+    <div class="sidebar">
+      <div class="sidebar-brand">...</div>
+      <button class="nav-item active" data-view="overview">... </svg> Overview</button>
+        <button class="nav-item" data-view="centers"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/></svg> Centers</button>
+        <button class="nav-item" data-view="classes"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5"/></svg> Classes</button>
+        <button class="nav-item" data-view="subjects"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg> Subjects</button>
+        <button class="nav-item" data-view="teachers"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg> Teachers</button>
+        <button class="nav-item" data-view="students"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/></svg> Students</button>
+        <button class="nav-item" data-view="exams"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 6l3 3"/></svg> Exams</button>
+        <button class="nav-item" data-view="results"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg> Results</button>
+        <button class="nav-item" data-view="notifications"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 21a2 2 0 0 0 4 0"/></svg> Notifications<span id="pendingBadge"></span></button>
         <button class="nav-item logout" onclick="logout()">&larr; Log out</button>
       </div>
       <div class="main" id="adminMain"></div>
@@ -1049,7 +1076,7 @@ async function renderOverview(main){
     <p class="lede">Live from the real database — not local browser storage.</p>
     ${orgStatsHtml ? `<div class="panel">${orgStatsHtml}</div>` : ''}
     <h3 style="${orgStatsHtml ? '' : 'margin-top:0;'}">${isItSupport ? 'Currently selected center' : 'This center'}</h3>
-    <div class="badge-row">
+        <div class="badge-row stats-accent">
       <div class="stat"><span class="num">${classes.length}</span><span class="lbl">Classes</span></div>
       <div class="stat"><span class="num">${teachers.length}</span><span class="lbl">Teachers</span></div>
       <div class="stat"><span class="num">${students.length}</span><span class="lbl">Students</span></div>
@@ -2005,7 +2032,7 @@ function applyBrandLogoEverywhere(){
 applyBrandLogoEverywhere();
 </script>
 
-
+<button class="theme-toggle" onclick="document.body.classList.toggle('dark-theme'); document.getElementById('tl').textContent=document.body.classList.contains('dark-theme')?'Dark':'Light';"><svg class="i" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg> <span id="tl">Light</span></button>
 
 
 
