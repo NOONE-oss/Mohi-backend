@@ -89,3 +89,29 @@ centersRouter.patch('/:id/active', (req, res, next) => {
   if (!rows[0]) return res.status(404).json({ error: 'Center not found' });
   res.json(rows[0]);
 }));
+// Org-wide headline numbers for IT's own dashboard — the one deliberate
+// exception to "every query is scoped to req.auth.centerId." IT is the only
+// role allowed to see a sum across every center at once; this still only
+// returns counts, never any actual student/teacher/mark records.
+centersRouter.get('/org-stats', (req, res, next) => {
+  if (req.auth.role !== 'it_support') return res.status(403).json({ error: 'Only IT support can see org-wide totals' });
+  next();
+}, asyncHandler(async (req, res) => {
+  const [centers, students, teachers, perCenter] = await Promise.all([
+    query(`SELECT count(*)::int AS n FROM centers WHERE is_active = true`),
+    query(`SELECT count(*)::int AS n FROM students`),
+    query(`SELECT count(*)::int AS n FROM teachers`),
+    query(`
+      SELECT c.id, c.name,
+        (SELECT count(*)::int FROM students s WHERE s.center_id = c.id) AS student_count,
+        (SELECT count(*)::int FROM teachers t WHERE t.center_id = c.id) AS teacher_count
+      FROM centers c WHERE c.is_active = true ORDER BY c.name
+    `),
+  ]);
+  res.json({
+    centers: centers.rows[0].n,
+    students: students.rows[0].n,
+    teachers: teachers.rows[0].n,
+    perCenter: perCenter.rows,
+  });
+}));

@@ -1021,9 +1021,34 @@ async function renderOverview(main){
   const [classes, teachers, students, exams] = await Promise.all([
     api('/classes'), api('/teachers'), api('/students'), api('/exams'),
   ]);
+
+  let orgStatsHtml = '';
+  if(isItSupport){
+    try{
+      const org = await api('/centers/org-stats');
+      const rows = org.perCenter.map(c=>`
+        <tr>
+          <td>${escapeHtml(c.name)}</td>
+          <td class="pts">${c.student_count}</td>
+          <td class="pts">${c.teacher_count}</td>
+        </tr>`).join('');
+      orgStatsHtml = `
+        <h3 style="margin-top:0;">Across all centers</h3>
+        <div class="badge-row">
+          <div class="stat"><span class="num">${org.centers}</span><span class="lbl">Centers</span></div>
+          <div class="stat"><span class="num">${org.students}</span><span class="lbl">Students (org-wide)</span></div>
+          <div class="stat"><span class="num">${org.teachers}</span><span class="lbl">Teachers (org-wide)</span></div>
+        </div>
+        <table style="margin-top:14px;"><thead><tr><th>Center</th><th>Students</th><th>Teachers</th></tr></thead><tbody>${rows}</tbody></table>
+      `;
+    }catch(err){ /* non-fatal — just skip the org-wide panel */ }
+  }
+
   main.innerHTML = `
     <h2>Overview</h2>
     <p class="lede">Live from the real database — not local browser storage.</p>
+    ${orgStatsHtml ? `<div class="panel">${orgStatsHtml}</div>` : ''}
+    <h3 style="${orgStatsHtml ? '' : 'margin-top:0;'}">${isItSupport ? 'Currently selected center' : 'This center'}</h3>
     <div class="badge-row">
       <div class="stat"><span class="num">${classes.length}</span><span class="lbl">Classes</span></div>
       <div class="stat"><span class="num">${teachers.length}</span><span class="lbl">Teachers</span></div>
@@ -1032,6 +1057,9 @@ async function renderOverview(main){
     </div>
     <div class="placeholder-box">
       <div class="tagline">${isItSupport ? 'IT support session' : 'School admin session'}</div>
+      ${isItSupport
+        ? 'Use the center switcher above to move between centers. Everything below the org-wide panel reflects whichever center is currently selected.'
+        : 'This view only ever shows Ndovoini Center\'s own data — the server enforces that from your login token, not from anything chosen in this browser.'}
     </div>
   `;
 }
