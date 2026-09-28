@@ -10,58 +10,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
-  /* ===== DARK MODE FIXES ===== */
-:root{
-  --input-bg:#FCFCFB;
-  --tab-bg:#E7E9E4;
-  --modal-bg:#FFFFFF;
-}
-body.dark-theme{
-  color-scheme:dark;
-  --input-bg:#0d1420;
-  --tab-bg:#0d1420;
-  --modal-bg:#151b2e;
-}
-
-/* text that used the dark navy color */
-.stat .num{ color:var(--text); }
-.placeholder-box .tagline{ color:var(--text); }
-.tab{ background:var(--tab-bg); }
-.tab.active{ background:var(--paper-raised); color:var(--text); }
-.rc-head{ border-bottom-color:var(--text); }
-.rc-watermark{ color:var(--text); }
-
-/* modals were always white */
-.modal{ background:var(--modal-bg); color:var(--text); }
-
-/* form fields */
-input[type=text], input[type=password], input[type=number], select, textarea,
-.remark-box, .pct-input{
-  background:var(--input-bg);
-  color:var(--text);
-}
-::placeholder{ color:var(--text-soft); opacity:0.8; }
-
-/* buttons that blended into the cards */
-body.dark-theme .btn:not(.ghost):not(.gold){ background:var(--brand-blue-deep); }
-body.dark-theme .btn:not(.ghost):not(.gold):hover{ background:var(--brand-blue); }
-.btn.gold:hover{ background:var(--brand-blue); }  /* was brown #a57630 */
-
-/* small blue labels are too dim on dark */
-body.dark-theme .pw-toggle,
-body.dark-theme .login-panel .eyebrow{ color:var(--brand-blue); }
-
-/* newsletter box has a light background, so keep its text dark */
-.rc-newsletter{ color:#1A2233; }
-
-/* printed report cards should always be light, even in dark mode */
-@media print{
-  body.dark-theme{
-    color-scheme:light;
-    --ink-navy:#1F2139; --paper:#F5F6F4; --paper-raised:#FFFFFF;
-    --line:#DADFE2; --text:#1A2233; --text-soft:#5B6478;
-  }
-}
   :root{
     --ink-navy:#1F2139;
     --ink-navy-2:#203656;
@@ -618,6 +566,66 @@ body.dark-theme .login-panel .eyebrow{ color:var(--brand-blue); }
   }
   .it-strip select{ margin:0; padding:5px 8px; font-size:0.78rem; width:auto; }
   .spinner-row{ padding:30px; text-align:center; color:var(--text-soft); font-size:0.85rem; }
+  /* ===== DARK MODE + SIDEBAR FIXES (keep this last) ===== */
+:root{
+  --input-bg:#FCFCFB;
+  --tab-bg:#E7E9E4;
+  --modal-bg:#FFFFFF;
+}
+body.dark-theme{
+  color-scheme:dark;
+  --input-bg:#0d1420;
+  --tab-bg:#0d1420;
+  --modal-bg:#151b2e;
+}
+
+.stat .num{ color:var(--text); }
+.placeholder-box .tagline{ color:var(--text); }
+.tab{ background:var(--tab-bg); }
+.tab.active{ background:var(--paper-raised); color:var(--text); }
+.rc-head{ border-bottom-color:var(--text); }
+.rc-watermark{ color:var(--text); }
+.modal{ background:var(--modal-bg); color:var(--text); }
+
+input[type=text], input[type=password], input[type=number], select, textarea,
+.remark-box, .pct-input{
+  background:var(--input-bg);
+  color:var(--text);
+}
+::placeholder{ color:var(--text-soft); opacity:0.8; }
+
+body.dark-theme .btn:not(.ghost):not(.gold){ background:var(--brand-blue-deep); }
+body.dark-theme .btn:not(.ghost):not(.gold):hover{ background:var(--brand-blue); }
+.btn.gold:hover{ background:var(--brand-blue); }
+
+body.dark-theme .pw-toggle,
+body.dark-theme .login-panel .eyebrow{ color:var(--brand-blue); }
+.rc-newsletter{ color:#1A2233; }
+
+/* sidebar */
+#adminShell.visible{ flex-direction:column; }
+.sidebar{ border-right:1px solid var(--line); padding-bottom:70px; }
+body.dark-theme .sidebar{ background:#0f1626; }
+.sidebar-brand .name{ color:#fff; }
+.sidebar button.nav-item svg{ opacity:0.85; }
+.sidebar button.nav-item.active svg{ opacity:1; }
+.sidebar .logout{ margin-top:auto; }
+.it-strip select{ background:var(--input-bg); color:var(--text); }
+
+@media (max-width:720px){
+  .sidebar{ padding-bottom:20px; }
+  .sidebar-brand{ display:none; }
+  .sidebar .logout{ margin-top:0; }
+}
+
+/* printed report cards always light */
+@media print{
+  body.dark-theme{
+    color-scheme:light;
+    --ink-navy:#1F2139; --paper:#F5F6F4; --paper-raised:#FFFFFF;
+    --line:#DADFE2; --text:#1A2233; --text-soft:#5B6478;
+  }
+}
 </style>
 </head>
 </head>
@@ -702,7 +710,7 @@ body.dark-theme .login-panel .eyebrow{ color:var(--brand-blue); }
   </div>
 
   <!-- ADMIN SHELL -->
-   <div id="adminShell" class="app-shell">
+  <div id="adminShell" class="app-shell">
   <div class="it-strip no-print" id="itStrip" style="display:none;">
     <span>Center: <strong id="itCurrentCenter">—</strong></span>
     <span>Switch center:
@@ -715,7 +723,7 @@ body.dark-theme .login-panel .eyebrow{ color:var(--brand-blue); }
         <img id="sidebarBrandLogo" src="" alt="MOHI logo">
         <div class="name" id="sidebarCenterName">Missions of Hope Intl.</div>
       </div>
-      <button class="nav-item active" data-view="overview"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg> Overview</button>
+      <button class="nav-item active" data-view="overview"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg> Overview</button> 
         <button class="nav-item" data-view="centers"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/></svg> Centers</button>
         <button class="nav-item" data-view="classes"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5"/></svg> Classes</button>
         <button class="nav-item" data-view="subjects"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg> Subjects</button>
@@ -933,7 +941,7 @@ async function handleItSwitch(centerId){
   if(!centerId) return;
   try{
     const data = await api('/auth/admin/switch-center', { method:'POST', body:{ centerId } });
-    authToken = data.token; authCenterId = centerId;
+    authToken = data.token; authCenterId = centerId; currentCenterName = data.center.name;
     document.getElementById('itCurrentCenter').textContent = data.center.name;
     document.getElementById('sidebarCenterName').innerHTML = `${escapeHtml(data.center.name)}<br>Missions of Hope Intl.`;
     renderAdminView(currentAdminView || 'overview');
@@ -1036,7 +1044,8 @@ const TEACHER_LOGIN_HTML = document.getElementById('teacherLogin').innerHTML;
 /* =====================================================================
    ADMIN SHELL
    ===================================================================== */
-let currentAdminView = 'overview';
+   let currentCenterName = '';
+   let currentAdminView = 'overview';
 
 async function enterAdminShell(){
   document.getElementById('loginScreen').style.display='none';
@@ -1142,7 +1151,7 @@ async function renderOverview(main){
       <div class="tagline">${isItSupport ? 'IT support session' : 'School admin session'}</div>
       ${isItSupport
         ? 'Use the center switcher above to move between centers. Everything below the org-wide panel reflects whichever center is currently selected.'
-        : 'This view only ever shows Ndovoini Center\'s own data — the server enforces that from your login token, not from anything chosen in this browser.'}
+        : `This view only ever shows ${escapeHtml(currentCenterName || 'your center')}'s own data — the server enforces that from your login token, not from anything chosen in this browser.`}
     </div>
   `;
 }
@@ -1161,7 +1170,7 @@ async function renderCenters(main){
     </tr>`).join('');
   main.innerHTML = `
     <h2>Centers</h2>
-    <p class="lede">${isItSupport ? 'Every MOHI center in the system.' : 'This is the one center your login can see — a school admin never sees another center\'s row here, let alone its data.'}</p>
+    <p class="lede">${isItSupport ? 'Every MOHI center in the system.' : `This is the one center your login can see — a school admin never sees another center\'s row here, let alone its data.`}</p>
     ${isItSupport ? `
     <div class="panel">
       <h3>Add a center</h3>
