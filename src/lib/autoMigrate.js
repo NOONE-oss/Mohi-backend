@@ -30,4 +30,23 @@ export async function ensureSchema() {
   } else {
     console.log(`[startup] Database already has ${countRows[0].n} center(s) — skipping seed.`);
   }
+    // Exact class+subject pairs per teacher. Created once; existing teachers are
+  // backfilled from what they already have, so nobody loses their assignments.
+  const { rows: t } = await pool.query(`SELECT to_regclass('public.teacher_assignments') AS exists`);
+  if (!t[0].exists) {
+    console.log('[startup] Creating teacher_assignments...');
+    await pool.query(`
+      CREATE TABLE teacher_assignments (
+        teacher_id uuid NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+        class_id   uuid NOT NULL REFERENCES classes(id)  ON DELETE CASCADE,
+        subject_id uuid NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+        PRIMARY KEY (teacher_id, class_id, subject_id)
+      );
+      INSERT INTO teacher_assignments (teacher_id, class_id, subject_id)
+      SELECT ct.teacher_id, ct.class_id, ts.subject_id
+      FROM class_teachers ct
+      JOIN teacher_subjects ts ON ts.teacher_id = ct.teacher_id
+      ON CONFLICT DO NOTHING;
+    `);
+  }
 }

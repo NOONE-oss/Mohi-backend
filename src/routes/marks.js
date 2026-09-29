@@ -6,6 +6,16 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 
 export const marksRouter = Router();
 marksRouter.use(requireAuth);
+// Teachers may only touch marks for a class + subject pair assigned to them.
+// Admins and IT support are unaffected.
+async function teacherAllowed(req, classId, subjectId) {
+  if (req.auth.role !== 'teacher') return true;
+  const { rows } = await query(
+    `SELECT 1 FROM teacher_assignments WHERE teacher_id = $1 AND class_id = $2 AND subject_id = $3`,
+    [req.auth.sub, classId, subjectId]
+  );
+  return !!rows[0];
+}
 
 // Grid data for a teacher's mark-entry screen: every student in a class,
 // with their existing mark (if any) for one subject/exam.
@@ -13,6 +23,9 @@ marksRouter.get('/', requireRole('teacher', 'admin'), asyncHandler(async (req, r
   const { examId, classId, subjectId } = req.query;
   if (!examId || !classId || !subjectId) return res.status(400).json({ error: 'examId, classId and subjectId are required' });
 
+    if (!(await teacherAllowed(req, classId, subjectId))) {
+    return res.status(403).json({ error: 'You are not assigned to that class and subject.' });
+  }
   const { rows } = await query(
     `SELECT s.id AS student_id, s.full_name, m.sublevel, m.points, m.percent
      FROM students s
@@ -47,11 +60,14 @@ marksRouter.put('/', requireRole('teacher', 'admin'), asyncHandler(async (req, r
   // Ownership checks — every id in the request must resolve inside this center.
   const exam = await query(`SELECT id, is_published FROM exams WHERE id = $1 AND center_id = $2`, [examId, req.auth.centerId]);
   if (!exam.rows[0]) return res.status(404).json({ error: 'Exam not found at this center' });
-  const student = await query(`SELECT id, full_name FROM students WHERE id = $1 AND center_id = $2`, [studentId, req.auth.centerId]);
+  const student = await query(`SELECT id, full_name, class_id FROM students WHERE id = $1 AND center_id = $2`, [studentId, req.auth.centerId]);
   if (!student.rows[0]) return res.status(404).json({ error: 'Student not found at this center' });
   const subject = await query(`SELECT id, name FROM subjects WHERE id = $1 AND center_id = $2`, [subjectId, req.auth.centerId]);
   if (!subject.rows[0]) return res.status(404).json({ error: 'Subject not found at this center' });
 
+  if (!(await teacherAllowed(req, student.rows[0].class_id, subjectId))) {
+    return res.status(403).json({ error: 'You are not assigned to that class and subject.' });
+  }
   const points = SUBLEVEL_POINTS[sublevel];
   const existing = await query(
     `SELECT id, sublevel FROM marks WHERE exam_id = $1 AND student_id = $2 AND subject_id = $3`,
@@ -93,6 +109,11 @@ marksRouter.delete('/', requireRole('teacher', 'admin'), asyncHandler(async (req
   const exam = await query(`SELECT id, is_published FROM exams WHERE id = $1 AND center_id = $2`, [examId, req.auth.centerId]);
   if (!exam.rows[0]) return res.status(404).json({ error: 'Exam not found at this center' });
   const existing = await query(`SELECT id, sublevel FROM marks WHERE exam_id = $1 AND student_id = $2 AND subject_id = $3`, [examId, studentId, subjectId]);
+  const stu = await query(`SELECT class_id FROM students WHERE id = $1 AND center_id = $2`, [studentId, req.auth.centerId]);
+  if (!stu.rows[0]) return res.status(404).json({ error: 'Student not found at this center' });
+  if (!(await teacherAllowed(req, stu.rows[0].class_id, subjectId))) {
+    return res.status(403).json({ error: 'You are not assigned to that class and subject.' });
+  }
   if (!existing.rows[0]) return res.status(204).end(); // nothing to clear
 
   if (exam.rows[0].is_published) {

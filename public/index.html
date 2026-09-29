@@ -665,6 +665,16 @@ body.dark-theme .sidebar{ background:#0f1626; }
     color:var(--text-soft); font-size:0.82rem; font-family:inherit;
   }
   .auth-link:hover{ color:var(--text); }
+  .check-group{
+  display:flex; flex-wrap:wrap; gap:6px; max-height:130px; overflow:auto;
+  padding:8px; border:1px solid var(--line); border-radius:6px; background:var(--input-bg);
+}
+.check-group label{
+  display:flex; align-items:center; gap:6px; margin:0; padding:4px 10px;
+  font-size:0.82rem; font-weight:500; text-transform:none; letter-spacing:0;
+  color:var(--text); border:1px solid var(--line); border-radius:20px; cursor:pointer;
+}
+.check-group input{ width:auto; margin:0; }
 </style>
 </head>
 <body>
@@ -1447,17 +1457,47 @@ async function deleteSubject(id){
 /* =====================================================================
    TEACHERS
    ===================================================================== */
+let pairState = {};
+let pairNames = { classes:{}, subjects:{} };
+function pairBuilder(key, classes, subjects, pairs){
+  pairNames.classes = Object.fromEntries(classes.map(c=>[c.id,c.name]));
+  pairNames.subjects = Object.fromEntries(subjects.map(s=>[s.id,s.name]));
+  pairState[key] = pairs.slice();
+  return `
+    <div class="row-form" style="margin-bottom:8px;">
+      <div class="field"><select id="pb-${key}-class">${classes.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select></div>
+      <div class="field"><select id="pb-${key}-subject">${subjects.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select></div>
+      <button type="button" class="btn small ghost" onclick="pairAdd('${key}')">+ Add</button>
+    </div>
+    <div class="check-group" id="pb-${key}-list"></div>`;
+}
+function pairRender(key){
+  const box = document.getElementById(`pb-${key}-list`);
+  if(!box) return;
+  const list = pairState[key] || [];
+  box.innerHTML = list.length
+    ? list.map((p,i)=>`<label>${escapeHtml(pairNames.classes[p.classId]||'?')} — ${escapeHtml(pairNames.subjects[p.subjectId]||'?')}
+        <a href="#" onclick="pairRemove('${key}',${i});return false;" style="color:var(--error);text-decoration:none;">&times;</a></label>`).join('')
+    : '<span class="hint" style="margin:0;">No class + subject added yet</span>';
+}
+function pairAdd(key){
+  const classId = document.getElementById(`pb-${key}-class`).value;
+  const subjectId = document.getElementById(`pb-${key}-subject`).value;
+  if(!classId || !subjectId) return;
+  if(pairState[key].some(p=>p.classId===classId && p.subjectId===subjectId)) return;
+  pairState[key].push({ classId, subjectId });
+  pairRender(key);
+}
+function pairRemove(key, i){ pairState[key].splice(i,1); pairRender(key); }
 async function renderTeachers(main, summaryHtml){
   const [teachers, classes, subjects] = await Promise.all([api('/teachers'), api('/classes'), api('/subjects')]);
   const rows = teachers.map((t,i)=>{
-    const classNames = (t.class_ids||[]).map(id=>(classes.find(c=>c.id===id)||{}).name).filter(Boolean).join(', ');
-    const subjNames = (t.subject_ids||[]).map(id=>(subjects.find(s=>s.id===id)||{}).name).filter(Boolean).join(', ');
+    let pairText = (t.assignments||[]).map(a=>`${(classes.find(c=>c.id===a.class_id)||{}).name||'?'} — ${(subjects.find(s=>s.id===a.subject_id)||{}).name||'?'}`).join('<br>');
     return `<tr>
       <td class="idx">${String(i+1).padStart(2,'0')}</td>
       <td>${escapeHtml(t.full_name)}</td>
       <td><span class="tag">${sectionLabel(t.section)}</span></td>
-      <td><span class="tag">${classNames || '—'}</span></td>
-      <td>${subjNames || '—'}</td>
+      <td>${pairText || '—'}</td>
       <td>${escapeHtml(t.phone || '—')}</td>
       <td>
         <button class="btn small ghost" onclick="openTeacherBioModal('${t.id}')">Edit / bio</button>
@@ -1465,8 +1505,6 @@ async function renderTeachers(main, summaryHtml){
       </td>
     </tr>`;
   }).join('');
-  const classOpts = classes.map(c=>`<option value="${c.id}">${escapeHtml(c.name)} — ${sectionLabel(c.section)}</option>`).join('');
-  const subjOpts = subjects.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
   main.innerHTML = `
     <h2>Teachers</h2>
     <p class="lede">All staff at this center share one login — the section below is just each teacher's own classification (which classes make sense for them), not a separate login.</p>
@@ -1482,11 +1520,12 @@ async function renderTeachers(main, summaryHtml){
             <option value="SENIOR">Senior School</option>
           </select>
         </div>
-        <div class="field"><label for="newTeacherClass">Class</label><select id="newTeacherClass">${classOpts || '<option value="">No classes yet</option>'}</select></div>
-        <div class="field"><label for="newTeacherSubject">Subject</label><select id="newTeacherSubject">${subjOpts || '<option value="">No subjects yet</option>'}</select></div>
+        <div class="field" style="flex-basis:100%;"><label>Classes and subjects they teach (pick a class and a subject, then + Add. Repeat for each pair)</label>
+          ${pairBuilder('new', classes, subjects, [])}
+        </div>
         <button class="btn" onclick="addTeacher()">Add teacher</button>
       </div>
-      ${teachers.length ? `<table><thead><tr><th></th><th>Name</th><th>Section</th><th>Class(es)</th><th>Subjects</th><th>Phone</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No teachers yet.</div>'}
+      ${teachers.length ? `<table><thead><tr><th></th><th>Name</th><th>Section</th><th>Class — Subject</th><th>Phone</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No teachers yet.</div>'}
     </div>
     <div class="panel">
       <h3>Bulk upload teachers (CSV)</h3>
@@ -1498,7 +1537,8 @@ async function renderTeachers(main, summaryHtml){
       ${summaryHtml || ''}
     </div>
   `;
-}
+  pairRender('new');
+}   
 async function importTeachersCsv(){
   const fileInput = document.getElementById('teacherCsvFile');
   try{
@@ -1514,28 +1554,25 @@ async function addTeacher(){
   const fullName = document.getElementById('newTeacherName').value.trim();
   const phone = document.getElementById('newTeacherPhone').value.trim();
   const section = document.getElementById('newTeacherSection').value;
-  const classId = document.getElementById('newTeacherClass').value;
-  const subjectId = document.getElementById('newTeacherSubject').value;
   if(!fullName) return;
   try{
-    await api('/teachers', { method:'POST', body:{ fullName, phone, section, classId, subjectId } });
+    await api('/teachers', { method:'POST', body:{ fullName, phone, section, assignments: pairState.new } });
     renderTeachers(document.getElementById('adminMain'));
   }catch(err){ alert(err.message); }
 }
-async function deleteTeacher(id){
-  try{ await api(`/teachers/${id}`, { method:'DELETE' }); renderTeachers(document.getElementById('adminMain')); }
-  catch(err){ alert(err.message); }
-}
 async function openTeacherBioModal(id){
-  const teachers = await api('/teachers');
+  const [teachers, classes, subjects] = await Promise.all([api('/teachers'), api('/classes'), api('/subjects')]);
   const t = teachers.find(x=>x.id===id);
   if(!t) return;
+  const pairs = (t.assignments||[]).map(a=>({ classId:a.class_id, subjectId:a.subject_id }));
   openModal(`
     <h3>Edit teacher</h3>
     <label for="editTchName">Full name</label>
     <input type="text" id="editTchName" value="${escapeHtml(t.full_name)}">
     <label for="editTchPhone">Phone</label>
     <input type="text" id="editTchPhone" value="${escapeHtml(t.phone||'')}">
+    <label>Classes and subjects they teach</label>
+    <div style="margin-bottom:16px;">${pairBuilder('edit', classes, subjects, pairs)}</div>
     <label for="editTchBio">Bio (shown to parents via the report card contact link)</label>
     <textarea id="editTchBio" rows="4" class="remark-box">${escapeHtml(t.bio||'')}</textarea>
     <div style="display:flex; gap:10px; margin-top:14px;">
@@ -1543,6 +1580,7 @@ async function openTeacherBioModal(id){
       <button class="btn ghost" style="width:auto; padding:9px 18px;" onclick="closeModal()">Cancel</button>
     </div>
   `);
+  pairRender('edit');
 }
 async function saveTeacherBio(id){
   const fullName = document.getElementById('editTchName').value.trim();
@@ -1550,6 +1588,7 @@ async function saveTeacherBio(id){
   const bio = document.getElementById('editTchBio').value.trim();
   try{
     await api(`/teachers/${id}`, { method:'PATCH', body:{ fullName, phone, bio } });
+    await api(`/teachers/${id}/assignments`, { method:'PUT', body:{ assignments: pairState.edit } });
     closeModal();
     renderTeachers(document.getElementById('adminMain'));
   }catch(err){ alert(err.message); }
@@ -1898,11 +1937,12 @@ async function renderTeacherMain(examId, classId, subjectId, summaryHtml){
   const [teachers, classes, subjects, exams] = await Promise.all([
     api('/teachers'), api('/classes'), api('/subjects'), api('/exams'),
   ]);
-  const me = teachers.find(t=>t.id===currentTeacher.id) || { class_ids:[], subject_ids:[] };
-  const myClassIds = me.class_ids || [];
-  const mySubjectIds = me.subject_ids || [];
-
-  if(!myClassIds.length || !mySubjectIds.length){
+    const me = teachers.find(t=>t.id===currentTeacher.id) || { class_ids:[], subject_ids:[], assignments:[] };
+  let pairs = me.assignments || [];
+  if(!pairs.length){  // safety net for teachers without saved pairs
+    (me.class_ids||[]).forEach(c=>(me.subject_ids||[]).forEach(s=>pairs.push({ class_id:c, subject_id:s })));
+  }
+  if(!pairs.length){
     document.getElementById('teacherClassInfo').textContent = '';
     main.innerHTML = `<div class="placeholder-box"><div class="tagline">No class or subject assigned yet</div>Ask your School Admin to assign you a class and subject under Teachers.</div>`;
     return;
@@ -1911,17 +1951,17 @@ async function renderTeacherMain(examId, classId, subjectId, summaryHtml){
     main.innerHTML = `<div class="placeholder-box"><div class="tagline">No exam periods open yet</div>Your School Admin needs to create an exam period first.</div>`;
     return;
   }
-
-  const cls = classes.find(c=>c.id===classId && myClassIds.includes(c.id)) || classes.find(c=>myClassIds.includes(c.id));
-  const subject = subjects.find(s=>s.id===subjectId) || subjects.find(s=>mySubjectIds.includes(s.id));
+  const pair = pairs.find(p=>p.class_id===classId && p.subject_id===subjectId) || pairs[0];
+  const cls = classes.find(c=>c.id===pair.class_id);
+  const subject = subjects.find(s=>s.id===pair.subject_id);
   const exam = exams.find(e=>e.id===examId) || exams[0];
-
   document.getElementById('teacherClassInfo').textContent = `Teaching ${subject.name} for ${cls.name} · ${sectionLabel(cls.section)}`;
 
   const examOpts = exams.map(e=>`<option value="${e.id}" ${e.id===exam.id?'selected':''}>${escapeHtml(e.name)}${e.is_published?' (published)':''}</option>`).join('');
-  const classOpts = myClassIds.map(id=>{
-    const c = classes.find(x=>x.id===id); if(!c) return '';
-    return `<option value="${id}" ${id===cls.id?'selected':''}>${escapeHtml(c.name)} — ${sectionLabel(c.section)}</option>`;
+   const pairOpts = pairs.map(p=>{
+    const c = classes.find(x=>x.id===p.class_id), s = subjects.find(x=>x.id===p.subject_id);
+    if(!c || !s) return '';
+    return `<option value="${c.id}|${s.id}" ${c.id===cls.id && s.id===subject.id ? 'selected':''}>${escapeHtml(c.name)} — ${escapeHtml(s.name)}</option>`;
   }).join('');
   const subjOpts = mySubjectIds.map(id=>{
     const s = subjects.find(x=>x.id===id); if(!s) return '';
@@ -1954,8 +1994,7 @@ async function renderTeacherMain(examId, classId, subjectId, summaryHtml){
   main.innerHTML = `
     <div class="select-row">
       <div class="field"><label for="teacherExamSel">Exam</label><select id="teacherExamSel">${examOpts}</select></div>
-      ${myClassIds.length>1 ? `<div class="field"><label for="teacherClassSel">Class</label><select id="teacherClassSel">${classOpts}</select></div>` : ''}
-      ${mySubjectIds.length>1 ? `<div class="field"><label for="teacherSubjectSel">Subject</label><select id="teacherSubjectSel">${subjOpts}</select></div>` : ''}
+      ${pairs.length>1 ? `<div class="field"><label for="teacherPairSel">Class & Subject</label><select id="teacherPairSel">${pairOpts}</select></div>` : ''}
       <div style="flex:1"></div>
       <div class="field" style="min-width:auto; text-align:right;"><label>&nbsp;</label><span class="tag">${escapeHtml(subject.name)} · ${escapeHtml(cls.name)}</span></div>
     </div>
@@ -1985,9 +2024,8 @@ async function renderTeacherMain(examId, classId, subjectId, summaryHtml){
     </div>` : ''}
   `;
   document.getElementById('teacherExamSel').addEventListener('change', e=>renderTeacherMain(e.target.value, cls.id, subject.id));
-  if(document.getElementById('teacherClassSel')) document.getElementById('teacherClassSel').addEventListener('change', e=>renderTeacherMain(exam.id, e.target.value, subject.id));
-  if(document.getElementById('teacherSubjectSel')) document.getElementById('teacherSubjectSel').addEventListener('change', e=>renderTeacherMain(exam.id, cls.id, e.target.value));
-
+   const ps = document.getElementById('teacherPairSel');
+  if(ps) ps.addEventListener('change', e=>{ const [c,s] = e.target.value.split('|'); renderTeacherMain(exam.id, c, s); });
   if(grid.length) loadRemarks(exam.id, cls.id, grid);
 }
 
