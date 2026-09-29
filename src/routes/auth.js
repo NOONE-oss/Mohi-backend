@@ -165,3 +165,57 @@ authRouter.post('/student/set-password', asyncHandler(async (req, res) => {
   const token = signToken({ sub: claims.sub, role: 'student', centerId: claims.centerId });
   res.json({ token });
 }));
+// ---------- UNIFIED LOGIN (Email / CIN) ----------
+// One form for everyone. The identifier decides which kind of account we look for:
+//   contains "@"  -> admin (school admin / IT), else the shared teacher login
+//   anything else -> student CIN
+async function issueAdminSession(admin, res) {
+  if (admin.role === 'it_support') {
+    const centers = await query(`SELECT id, name FROM centers WHERE is_active = true ORDER BY created_at DESC LIMIT 1`);
+    if (!centers.rows[0]) return res.status(500).json({ error: 'No centers exist yet — add one first.' });
+    const c = centers.rows[0];
+    const token = signToken({ sub: admin.id, role: 'it_support', centerId: c.id });
+    return res.json({ kind: 'admin', token, admin: { id: admin.id, name: admin.full_name, centerId: c.id }, isItSupport: true });
+  }
+  const token = signToken({ sub: admin.id, role: 'admin', centerId: admin.center_id });
+  res.json({ kind: 'admin', token, admin: { id: admin.id, name: admin.full_name, centerId: admin.center_id }, isItSupport: false });
+}
+
+authRouter.post('/login', asyncHandler(async (req, res) => {
+  const { identifier, password } = req.body;
+  if (!identifier || !password) return res.status(400).json({ error: 'Enter your Email / CIN and password.' });
+  const id = identifier.trim();
+  const bad = () => res.status(401).json({ error: 'Incorrect Email / CIN or password' });
+
+  if (id.includes('@')) {
+    const email = id.toLowerCase();
+
+    const a = await query(
+      `SELECT id, center_id, role, full_name, password_hash FROM admins WHERE email = $1`, [email]);
+    if (a.rows[0] && await verifyPassword(password, a.rows[0].password_hash)) {
+      return issueAdminSession(a.rows[0], res);
+    }
+
+    const t = await query(
+      `SELECT id, center_id, password_hash FROM teacher_logins WHERE email = $1`, [email]);
+    if (t.rows[0] && await verifyPassword(password, t.rows[0].password_hash)) {
+      const teachers = await query(
+        `SELECT id, full_name FROM teachers WHERE center_id = $1 ORDER BY full_name`, [t.rows[0].center_id]);
+      const pendingToken = signToken({ role: 'teacher_pending', centerId: t.rows[0].center_id });
+      return res.json({ kind: 'teacher', pendingToken, teachers: teachers.rows });
+    }
+    return bad();
+  }
+
+  const s = await query(
+    `SELECT id, center_id, full_name, password_hash, password_changed FROM students WHERE school_id_number = $1`, [id]);
+  const student = s.rows[0];
+  if (!student || !(await verifyPassword(password, student.password_hash))) return bad();
+
+  if (!student.password_changed) {
+    const resetToken = signToken({ sub: student.id, role: 'student_reset', centerId: student.center_id });
+    return res.json({ kind: 'student', needsPasswordChange: true, resetToken });
+  }
+  const token = signToken({ sub: student.id, role: 'student', centerId: student.center_id });
+  res.json({ kind: 'student', token, student: { id: student.id, name: student.full_name } });
+}));

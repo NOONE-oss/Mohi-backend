@@ -627,7 +627,45 @@ body.dark-theme .sidebar{ background:#0f1626; }
   }
 }
 </style>
-</head>
+<style>
+  /* ===== NEW LOGIN (welcome + sign-in card) ===== */
+  .auth-wrap{ min-height:calc(100vh - 88px); display:grid; place-items:center; padding:24px 16px; }
+  .auth-card{
+    width:100%; max-width:420px; text-align:center;
+    background:var(--paper-raised); border:1px solid var(--line);
+    border-radius:28px; padding:40px 32px 26px;
+    box-shadow:0 30px 60px -30px rgba(0,0,0,0.6);
+  }
+  .auth-logo{ width:68px; height:68px; object-fit:contain; margin-bottom:16px; }
+  .auth-title{ font-family:'Fraunces',serif; font-size:1.9rem; margin:0 0 10px; color:var(--text); }
+  .auth-title span{ color:var(--brand-blue); }
+  .auth-sub{ color:var(--text-soft); font-size:0.92rem; line-height:1.55; margin:0 0 26px; }
+  .auth-btn{
+    width:100%; padding:14px; border:none; border-radius:14px; cursor:pointer;
+    background:linear-gradient(135deg,#0a5c96,#00a3e0); color:#fff;
+    font-weight:700; font-size:1rem; letter-spacing:0.01em;
+    box-shadow:0 14px 26px -14px rgba(0,163,224,0.7);
+  }
+  .auth-btn:hover{ filter:brightness(1.08); }
+  .auth-dots{ display:flex; justify-content:center; gap:10px; margin:26px 0 18px; }
+  .auth-dots span{ width:52px; height:5px; border-radius:4px; background:var(--line); }
+  .auth-dots span.on{ background:#0a5c96; }
+  .auth-dots span.on2{ background:#7dc242; }
+  .auth-foot{ font-size:0.68rem; letter-spacing:0.14em; font-weight:700; color:var(--text-soft); margin:0; }
+  .auth-form{ text-align:left; }
+  .auth-form .auth-title,.auth-form .auth-sub{ text-align:center; }
+  .auth-form label{ color:var(--text); font-size:0.8rem; text-transform:none; letter-spacing:0; font-weight:700; }
+  .auth-form input[type=text], .auth-form input[type=password], .auth-form select{
+    border-radius:14px; padding:14px 14px; font-size:0.95rem; background:var(--input-bg); color:var(--text);
+  }
+  .auth-remember{ display:flex; align-items:center; gap:10px; margin:0 0 18px; cursor:pointer; }
+  .auth-remember input{ width:18px; height:18px; margin:0; accent-color:#0a5c96; }
+  .auth-link{
+    display:block; margin:16px auto 0; background:none; border:none; cursor:pointer;
+    color:var(--text-soft); font-size:0.82rem; font-family:inherit;
+  }
+  .auth-link:hover{ color:var(--text); }
+</style>
 </head>
 <body>
 
@@ -641,73 +679,43 @@ body.dark-theme .sidebar{ background:#0f1626; }
 
 <div class="stage">
 
-  <!-- LOGIN -->
-  <div id="loginScreen" class="login-hero">
-    <div class="login-illustration">
-      <div class="blob b1"></div>
-      <div class="blob b2"></div>
-      <svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M100 30 L180 65 L100 100 L20 65 Z" fill="var(--brand-blue)"/>
-        <path d="M20 65 L20 120 Q20 128 27 131 L93 158 Q100 161 107 158 L173 131 Q180 128 180 120 L180 65" stroke="var(--brand-blue-soft)" stroke-width="4" fill="none" opacity="0.6"/>
-        <line x1="165" y1="72" x2="165" y2="128" stroke="#6FCF97" stroke-width="4"/>
-        <circle cx="165" cy="133" r="6" fill="#6FCF97"/>
-        <circle cx="100" cy="100" r="4" fill="#fff" opacity="0.9"/>
-      </svg>
-      <div class="tagline">
-        <h2>Mohi Results System</h2>
-        <p>Exam entry. Grading. Report cards. One system for every center.</p>
+   <!-- LOGIN -->
+  <div id="loginScreen" class="auth-wrap">
+    <div class="auth-card">
+
+      <!-- Step A: welcome -->
+      <div id="welcomeStep">
+        <img id="authLogoWelcome" class="auth-logo" alt="MOHI logo">
+        <h2 class="auth-title">MOHI <span>Results</span></h2>
+        <p class="auth-sub">The centralized system for exam entry, grading and report cards across every MOHI center.</p>
+        <button class="auth-btn" onclick="showSignIn()">Get Started &rarr;</button>
+        <div class="auth-dots"><span class="on"></span><span class="on2"></span></div>
+        <p class="auth-foot">&copy; 2026 MOHI RESULTS SYSTEM</p>
       </div>
-    </div>
-    <div class="login-panel">
-    <div class="folder">
-      <p class="eyebrow">Sign in</p>
-      <div class="tabs">
-        <button class="tab active" data-role="admin">Admin</button>
-        <button class="tab" data-role="teacher">Teacher</button>
-        <button class="tab" data-role="student">Student &amp; Parent</button>
+
+      <!-- Step B: sign in -->
+      <div id="signinStep" class="auth-form" style="display:none;">
+        <div style="text-align:center;"><img id="authLogoSignin" class="auth-logo" alt="MOHI logo"></div>
+        <h2 class="auth-title">Sign in</h2>
+        <p class="auth-sub">Enter your email or CIN number to continue</p>
+        <div id="loginError"></div>
+        <label for="loginId">Email / CIN</label>
+        <input type="text" id="loginId" autocomplete="username" placeholder="Email or CIN number">
+        <label for="loginPass">Password</label>
+        <div class="pw-wrap">
+          <input type="password" id="loginPass" autocomplete="current-password">
+          <button type="button" class="pw-toggle" onclick="togglePw('loginPass',this)">Show</button>
+        </div>
+        <label class="auth-remember"><input type="checkbox" id="rememberMe"> Remember me</label>
+        <button class="auth-btn" onclick="submitLogin()">Sign In</button>
+        <button class="auth-link" onclick="showWelcome()">&larr; Back</button>
       </div>
-      <div class="card">
 
-        <div id="adminLogin">
-          <h2>Admin sign in</h2>
-          <p class="sub">School admin.</p>
-          <div id="adminError"></div>
-          <label for="adminEmail">Admin email</label>
-          <input type="text" id="adminEmail" placeholder="admin@school">
-          <label for="adminPass">Password</label>
-          <div class="pw-wrap"><input type="password" id="adminPass"><button type="button" class="pw-toggle" onclick="togglePw('adminPass',this)">Show</button></div>
-          <button class="btn" onclick="loginAdmin()">Sign in</button>
-          <p class="hint">admin@school</p>
-        </div>
+      <!-- Step C: "which teacher are you?" (shared teacher login) -->
+      <div id="pickStep" class="auth-form" style="display:none;"></div>
 
-        <div id="teacherLogin" style="display:none;">
-          <h2>Teacher sign in</h2>
-          <p class="sub">you'll pick your name next.</p>
-          <div id="teacherError"></div>
-          <label for="teacherEmail">Staff email</label>
-          <input type="text" id="teacherEmail" placeholder="center@mohiafrica.org">
-          <label for="teacherPass">Password</label>
-          <div class="pw-wrap"><input type="password" id="teacherPass"><button type="button" class="pw-toggle" onclick="togglePw('teacherPass',this)">Show</button></div>
-          <button class="btn" onclick="loginTeacher()">Sign in</button>
-          <p class="hint">Center</p>
-        </div>
-
-        <div id="studentLogin" style="display:none;">
-          <h2>Student &amp; Parent sign in</h2>
-          <p class="sub">Use the student's School CIN Number.</p>
-          <div id="studentError"></div>
-          <label for="schoolId">School CIN number</label>
-          <input type="text" id="schoolId" placeholder="e.g. MOHI-0101">
-          <label for="studentPass">Password</label>
-          <div class="pw-wrap"><input type="password" id="studentPass"><button type="button" class="pw-toggle" onclick="togglePw('studentPass',this)">Show</button></div>
-          <button class="btn" onclick="loginStudent()">Sign in</button>
-          <p class="hint">First time logging in? Default password is <strong>Student@2026</strong> — you'll be asked to set a new one.</p>
-        </div>
-
-      </div>
     </div>
-    </div>
-  </div>
+  </div>  
 
   <!-- ADMIN SHELL -->
   <div id="adminShell" class="app-shell">
@@ -911,19 +919,127 @@ function showError(id, msg){ const el = document.getElementById(id); if(el) el.i
 
 <script>
 /* =====================================================================
-   LOGIN — tab switching + all four flows (school admin, IT support with
-   center picker, teacher shared login with "which teacher are you", and
-   student/parent with forced first-login password reset).
+   LOGIN — one Email / CIN form. The backend (/auth/login) decides the role.
    ===================================================================== */
-document.querySelectorAll('.tab').forEach(tab=>{
-  tab.addEventListener('click', ()=>{
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById('adminLogin').style.display = tab.dataset.role==='admin' ? 'block':'none';
-    document.getElementById('teacherLogin').style.display = tab.dataset.role==='teacher' ? 'block':'none';
-    document.getElementById('studentLogin').style.display = tab.dataset.role==='student' ? 'block':'none';
+function showStep(id){
+  ['welcomeStep','signinStep','pickStep'].forEach(s=>{
+    document.getElementById(s).style.display = (s===id) ? 'block' : 'none';
   });
+}
+function showSignIn(){
+  showStep('signinStep');
+  try{
+    const saved = localStorage.getItem('mohi-remember-id');
+    if(saved){ document.getElementById('loginId').value = saved; document.getElementById('rememberMe').checked = true; }
+  }catch(e){}
+  document.getElementById('loginId').focus();
+}
+function showWelcome(){ clearError('loginError'); showStep('welcomeStep'); }
+
+['loginId','loginPass'].forEach(id=>{
+  document.getElementById(id).addEventListener('keydown', e=>{ if(e.key==='Enter') submitLogin(); });
 });
+
+let pendingTeacherToken = null;
+
+async function submitLogin(){
+  clearError('loginError');
+  const identifier = document.getElementById('loginId').value.trim();
+  const password = document.getElementById('loginPass').value;
+  if(!identifier || !password){ showError('loginError', 'Enter your Email / CIN and password.'); return; }
+  try{
+    const data = await api('/auth/login', { method:'POST', body:{ identifier, password }, auth:false });
+
+    // "Remember me" only remembers the email/CIN — never the password.
+    try{
+      if(document.getElementById('rememberMe').checked) localStorage.setItem('mohi-remember-id', identifier);
+      else localStorage.removeItem('mohi-remember-id');
+    }catch(e){}
+
+    if(data.kind === 'admin'){
+      authToken = data.token; authRole = 'admin'; authCenterId = data.admin.centerId; isItSupport = !!data.isItSupport;
+      enterAdminShell();
+    } else if(data.kind === 'teacher'){
+      pendingTeacherToken = data.pendingToken;
+      promptTeacherName(data.teachers);
+    } else if(data.kind === 'student'){
+      if(data.needsPasswordChange){
+        pendingStudentResetToken = data.resetToken;
+        document.getElementById('pwModalBack').classList.add('visible');
+      } else {
+        authToken = data.token; authRole = 'student'; authCenterId = null;
+        currentStudent = data.student;
+        enterStudentShell();
+      }
+    }
+  }catch(err){ showError('loginError', err.message); }
+}
+
+async function handleItSwitch(centerId){
+  if(!centerId) return;
+  try{
+    const data = await api('/auth/admin/switch-center', { method:'POST', body:{ centerId } });
+    authToken = data.token; authCenterId = centerId; currentCenterName = data.center.name;
+    document.getElementById('itCurrentCenter').textContent = data.center.name;
+    document.getElementById('sidebarCenterName').innerHTML = `${escapeHtml(data.center.name)}<br>Missions of Hope Intl.`;
+    renderAdminView(currentAdminView || 'overview');
+  }catch(err){ alert(err.message); }
+}
+
+/* ---------- TEACHER: pick your name (shared login, for now) ---------- */
+function promptTeacherName(teachers){
+  const options = teachers.map(t=>`<option value="${t.id}">${escapeHtml(t.full_name)}</option>`).join('');
+  document.getElementById('pickStep').innerHTML = `
+    <h2 class="auth-title">Which teacher are you?</h2>
+    <p class="auth-sub">This keeps mark entries traceable to a person.</p>
+    <label for="teacherSelectName">Select your name</label>
+    <select id="teacherSelectName">${options || '<option value="">No teachers added yet</option>'}</select>
+    <button class="auth-btn" onclick="confirmTeacher()" ${teachers.length ? '' : 'disabled'}>Continue</button>
+    ${teachers.length ? '' : '<p class="auth-sub" style="margin-top:14px;">Ask your School Admin to add teachers under Teachers.</p>'}
+    <button class="auth-link" onclick="showSignIn()">&larr; Back</button>`;
+  showStep('pickStep');
+}
+async function confirmTeacher(){
+  const teacherId = document.getElementById('teacherSelectName').value;
+  try{
+    const data = await api('/auth/teacher/select', { method:'POST', body:{ pendingToken: pendingTeacherToken, teacherId }, auth:false });
+    authToken = data.token; authRole = 'teacher'; authCenterId = null;
+    currentTeacher = data.teacher;
+    enterTeacherShell();
+  }catch(err){ alert(err.message); }
+}
+
+/* ---------- STUDENT: forced first-login password change ---------- */
+async function setNewPassword(){
+  clearError('pwError');
+  const p1 = document.getElementById('newPw1').value;
+  const p2 = document.getElementById('newPw2').value;
+  if(p1.length < 6){ showError('pwError', 'Password must be at least 6 characters.'); return; }
+  if(p1 !== p2){ showError('pwError', "Passwords don't match."); return; }
+  try{
+    const data = await api('/auth/student/set-password', { method:'POST', body:{ resetToken: pendingStudentResetToken, newPassword: p1 }, auth:false });
+    authToken = data.token; authRole = 'student'; authCenterId = null;
+    document.getElementById('pwModalBack').classList.remove('visible');
+    document.getElementById('newPw1').value=''; document.getElementById('newPw2').value='';
+    currentStudent = { id: document.getElementById('loginId').value.trim(), name: '' };
+    enterStudentShell();
+  }catch(err){ showError('pwError', err.message); }
+}
+
+function logout(){
+  document.querySelectorAll('.app-shell').forEach(s=>s.classList.remove('visible'));
+  document.getElementById('loginScreen').style.display='grid';
+  document.getElementById('teacherMain').innerHTML='';
+  document.getElementById('studentMain').innerHTML='';
+  document.getElementById('itStrip').style.display='none';
+  authToken = null; authRole = null; authCenterId = null; isItSupport = false;
+  currentTeacher = null; currentStudent = null; pendingTeacherToken = null;
+  document.getElementById('loginPass').value='';
+  document.getElementById('loginPass').type='password';
+  clearError('loginError');
+  showWelcome();
+}
+</script>
 
 /* ---------- ADMIN (school_admin or it_support) ---------- */
 async function loginAdmin(){
@@ -2089,7 +2205,7 @@ function viewTeacherBioReadonly(){
 function applyBrandLogoEverywhere(){
   const src = document.querySelector('.seal img') ? document.querySelector('.seal img').src : '';
   if(!src) return;
-  ['sidebarBrandLogo','teacherHeaderLogo','studentHeaderLogo'].forEach(id=>{
+  ['sidebarBrandLogo','teacherHeaderLogo','studentHeaderLogo','authLogoWelcome','authLogoSignin'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.src = src;
   });
