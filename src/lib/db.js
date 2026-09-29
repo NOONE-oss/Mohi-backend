@@ -3,7 +3,11 @@ import 'dotenv/config';
 
 export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-});
+  ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 10000,
+  idleTimeoutMillis: 30000,
+  keepAlive: true
+})
 
 // Thin query helper. Deliberately NOT an ORM: for a system whose central
 // promise is "one center can never see another's data," every query that

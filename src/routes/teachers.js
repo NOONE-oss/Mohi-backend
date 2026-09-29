@@ -5,6 +5,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 
 export const teachersRouter = Router();
 teachersRouter.use(requireAuth);
+
 // pairs = [{ classId, subjectId }]. Saves exact pairs, then keeps the older
 // class_teachers / teacher_subjects tables in sync so other pages keep working.
 async function setAssignments(teacherId, centerId, pairs) {
@@ -24,7 +25,7 @@ async function setAssignments(teacherId, centerId, pairs) {
                SELECT DISTINCT class_id, teacher_id FROM teacher_assignments WHERE teacher_id = $1
                ON CONFLICT DO NOTHING`, [teacherId]);
   await query(`INSERT INTO teacher_subjects (teacher_id, subject_id)
-               SELECT DISTINCT subject_id, teacher_id FROM teacher_assignments WHERE teacher_id = $1
+               SELECT DISTINCT teacher_id, subject_id FROM teacher_assignments WHERE teacher_id = $1
                ON CONFLICT DO NOTHING`, [teacherId]);
 }
 
@@ -33,8 +34,8 @@ teachersRouter.get('/', asyncHandler(async (req, res) => {
     `SELECT t.*,
        COALESCE(json_agg(DISTINCT c.id) FILTER (WHERE c.id IS NOT NULL), '[]') AS class_ids,
        COALESCE(json_agg(DISTINCT s.id) FILTER (WHERE s.id IS NOT NULL), '[]') AS subject_ids,
-             COALESCE((SELECT json_agg(json_build_object('class_id', ta.class_id, 'subject_id', ta.subject_id))
-                 FROM teacher_assignments ta WHERE ta.teacher_id = t.id), '[]') AS assignments 
+       COALESCE((SELECT json_agg(json_build_object('class_id', ta.class_id, 'subject_id', ta.subject_id))
+                 FROM teacher_assignments ta WHERE ta.teacher_id = t.id), '[]') AS assignments
      FROM teachers t
      LEFT JOIN class_teachers ct ON ct.teacher_id = t.id
      LEFT JOIN classes c ON c.id = ct.class_id
@@ -50,7 +51,11 @@ teachersRouter.get('/', asyncHandler(async (req, res) => {
 
 teachersRouter.post('/', requireRole('admin'), asyncHandler(async (req, res) => {
   const { fullName, phone, bio, section } = req.body;
-  const pairs = Array.isArray(req.body.assignments) ? req.body.assignments : [];
+  let pairs = Array.isArray(req.body.assignments) ? req.body.assignments : [];
+  // Compatibility: the old one-class/one-subject form still works until Section 3B.
+  if (!pairs.length && req.body.classId && req.body.subjectId) {
+    pairs = [{ classId: req.body.classId, subjectId: req.body.subjectId }];
+  }
   if (!fullName || !section) return res.status(400).json({ error: 'fullName and section are required' });
 
   const dupe = await query(
@@ -68,7 +73,7 @@ teachersRouter.post('/', requireRole('admin'), asyncHandler(async (req, res) => 
   res.status(201).json(rows[0]);
 }));
 
-// Change which classes/subjects an existing teacher has.
+// Change which class + subject pairs an existing teacher has.
 teachersRouter.put('/:id/assignments', requireRole('admin'), asyncHandler(async (req, res) => {
   const pairs = Array.isArray(req.body.assignments) ? req.body.assignments : [];
   const t = await query(`SELECT id FROM teachers WHERE id = $1 AND center_id = $2`, [req.params.id, req.auth.centerId]);
@@ -78,9 +83,7 @@ teachersRouter.put('/:id/assignments', requireRole('admin'), asyncHandler(async 
 }));
 
 // Bulk add via CSV — columns: Full Name, Section, Class, Subject, Phone.
-// Same name on multiple rows merges into one teacher with all those
-// class/subject assignments, so one teacher who teaches several
-// class-subject combos only needs one row per combo, not one row total.
+// Same name on multiple rows merges into one teacher with all those pairs.
 teachersRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res) => {
   const { csv } = req.body;
   if (!csv || !csv.trim()) return res.status(400).json({ error: 'csv text is required' });
@@ -96,7 +99,7 @@ teachersRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res)
   const start = /name/i.test(lines[0]?.[0] || '') ? 1 : 0;
   let added = 0;
   const skipped = [];
-  const teacherIdByName = new Map(); // within this upload, so repeated names merge
+  const teacherIdByName = new Map();
 
   for (let i = start; i < lines.length; i++) {
     const [name, sectionRaw, className, subjectName, phone] = lines[i];
@@ -120,14 +123,13 @@ teachersRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res)
       }
       teacherIdByName.set(name.toLowerCase(), teacherId);
     }
-    
-         const classId = className ? classByName.get(className.trim().toLowerCase()) : null;
+    const classId = className ? classByName.get(className.trim().toLowerCase()) : null;
     if (className && !classId) skipped.push(`Row ${i + 1}: class "${className}" not found`);
     if (classId) await query(`INSERT INTO class_teachers (class_id, teacher_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [classId, teacherId]);
     const subjectId = subjectName ? subjectByName.get(subjectName.trim().toLowerCase()) : null;
     if (subjectName && !subjectId) skipped.push(`Row ${i + 1}: subject "${subjectName}" not found`);
-    if (classId && subjectId) await query(`INSERT INTO teacher_assignments (teacher_id, class_id, subject_id, center_id) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [teacherId, classId, subjectId, req.auth.centerId]);
-    if (subjectId) await query(`INSERT INTO teacher_subjects (teacher_id, subject_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [teacherId, subjectId]);   
+    if (subjectId) await query(`INSERT INTO teacher_subjects (teacher_id, subject_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [teacherId, subjectId]);
+    if (classId && subjectId) await query(`INSERT INTO teacher_assignments (teacher_id, class_id, subject_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [teacherId, classId, subjectId]);
   }
   res.json({ added, skipped });
 }));
