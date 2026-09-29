@@ -1,10 +1,24 @@
 import { Router } from 'express';
 import { query } from '../lib/db.js';
+import { hashPassword } from '../lib/auth.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 
 export const teachersRouter = Router();
 teachersRouter.use(requireAuth);
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Is this email already used by any login (teacher, admin, or old shared login)?
+async function emailInUse(email, exceptTeacherId = null) {
+  const { rows } = await query(
+    `SELECT 1 FROM teachers WHERE lower(email) = $1 AND ($2::uuid IS NULL OR id <> $2::uuid)
+     UNION SELECT 1 FROM admins WHERE lower(email) = $1
+     UNION SELECT 1 FROM teacher_logins WHERE lower(email) = $1`,
+    [email, exceptTeacherId]
+  );
+  return !!rows[0];
+}
 
 // pairs = [{ classId, subjectId }]. Saves exact pairs, then keeps the older
 // class_teachers / teacher_subjects tables in sync so other pages keep working.
@@ -31,7 +45,8 @@ async function setAssignments(teacherId, centerId, pairs) {
 
 teachersRouter.get('/', asyncHandler(async (req, res) => {
   const { rows } = await query(
-    `SELECT t.*,
+    `SELECT t.id, t.center_id, t.full_name, t.phone, t.bio, t.section, t.created_at,
+       t.email, t.must_change_password,
        COALESCE(json_agg(DISTINCT c.id) FILTER (WHERE c.id IS NOT NULL), '[]') AS class_ids,
        COALESCE(json_agg(DISTINCT s.id) FILTER (WHERE s.id IS NOT NULL), '[]') AS subject_ids,
        COALESCE((SELECT json_agg(json_build_object('class_id', ta.class_id, 'subject_id', ta.subject_id))
@@ -50,24 +65,29 @@ teachersRouter.get('/', asyncHandler(async (req, res) => {
 }));
 
 teachersRouter.post('/', requireRole('admin'), asyncHandler(async (req, res) => {
-  const { fullName, phone, bio, section } = req.body;
+  const { fullName, phone, bio, section, password } = req.body;
+  const email = (req.body.email || '').trim().toLowerCase();
   let pairs = Array.isArray(req.body.assignments) ? req.body.assignments : [];
-  // Compatibility: the old one-class/one-subject form still works until Section 3B.
   if (!pairs.length && req.body.classId && req.body.subjectId) {
     pairs = [{ classId: req.body.classId, subjectId: req.body.subjectId }];
   }
-  if (!fullName || !section) return res.status(400).json({ error: 'fullName and section are required' });
+  if (!fullName || !section) return res.status(400).json({ error: 'Full name and section are required' });
+  if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Enter a valid email for this teacher — it is their login.' });
+  if (!password || password.length < 6) return res.status(400).json({ error: 'The default password must be at least 6 characters.' });
 
   const dupe = await query(
     `SELECT id FROM teachers WHERE center_id = $1 AND lower(full_name) = lower($2)`,
     [req.auth.centerId, fullName.trim()]);
   if (dupe.rows[0]) {
-    return res.status(409).json({ error: `${fullName.trim()} is already added — use Edit to give them more classes or subjects.` });
+    return res.status(409).json({ error: `${fullName.trim()} is already added — use Edit to change their classes, subjects or email.` });
   }
+  if (await emailInUse(email)) return res.status(409).json({ error: `${email} is already used by another login.` });
 
   const { rows } = await query(
-    `INSERT INTO teachers (center_id, full_name, phone, bio, section) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [req.auth.centerId, fullName.trim(), phone || null, bio || null, section]
+    `INSERT INTO teachers (center_id, full_name, phone, bio, section, email, password_hash, must_change_password)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+     RETURNING id, center_id, full_name, phone, bio, section, email, must_change_password`,
+    [req.auth.centerId, fullName.trim(), phone || null, bio || null, section, email, await hashPassword(password)]
   );
   await setAssignments(rows[0].id, req.auth.centerId, pairs);
   res.status(201).json(rows[0]);
@@ -82,8 +102,19 @@ teachersRouter.put('/:id/assignments', requireRole('admin'), asyncHandler(async 
   res.json({ ok: true });
 }));
 
+// Admin sets a new temporary password; the teacher must change it at next sign-in.
+teachersRouter.post('/:id/reset-password', requireRole('admin'), asyncHandler(async (req, res) => {
+  const { password } = req.body;
+  if (!password || password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+  const { rowCount } = await query(
+    `UPDATE teachers SET password_hash = $1, must_change_password = true WHERE id = $2 AND center_id = $3`,
+    [await hashPassword(password), req.params.id, req.auth.centerId]);
+  if (!rowCount) return res.status(404).json({ error: 'Teacher not found' });
+  res.json({ ok: true });
+}));
+
 // Bulk add via CSV — columns: Full Name, Section, Class, Subject, Phone.
-// Same name on multiple rows merges into one teacher with all those pairs.
+// Teachers added this way have no login until you give them an email + password in Edit.
 teachersRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res) => {
   const { csv } = req.body;
   if (!csv || !csv.trim()) return res.status(400).json({ error: 'csv text is required' });
@@ -136,10 +167,16 @@ teachersRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res)
 
 teachersRouter.patch('/:id', requireRole('admin'), asyncHandler(async (req, res) => {
   const { fullName, phone, bio } = req.body;
+  const email = req.body.email ? req.body.email.trim().toLowerCase() : null;
+  if (email) {
+    if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'That email address is not valid.' });
+    if (await emailInUse(email, req.params.id)) return res.status(409).json({ error: `${email} is already used by another login.` });
+  }
   const { rows } = await query(
-    `UPDATE teachers SET full_name = COALESCE($1, full_name), phone = $2, bio = $3
-     WHERE id = $4 AND center_id = $5 RETURNING *`,
-    [fullName || null, phone || null, bio || null, req.params.id, req.auth.centerId]
+    `UPDATE teachers SET full_name = COALESCE($1, full_name), phone = $2, bio = $3, email = COALESCE($6, email)
+     WHERE id = $4 AND center_id = $5
+     RETURNING id, center_id, full_name, phone, bio, section, email, must_change_password`,
+    [fullName || null, phone || null, bio || null, req.params.id, req.auth.centerId, email]
   );
   if (!rows[0]) return res.status(404).json({ error: 'Teacher not found' });
   res.json(rows[0]);

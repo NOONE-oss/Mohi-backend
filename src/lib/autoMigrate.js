@@ -6,6 +6,7 @@ import { seed } from '../scripts/seed.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Runs on every boot. Everything here is safe to repeat.
 export async function ensureSchema() {
   const { rows } = await pool.query(`SELECT to_regclass('public.centers') AS exists`);
   if (!rows[0].exists) {
@@ -24,8 +25,7 @@ export async function ensureSchema() {
     console.log(`[startup] Database already has ${countRows[0].n} center(s) — skipping seed.`);
   }
 
-  // Exact class+subject pairs per teacher. Created once; existing teachers are
-  // backfilled from what they already have, so nobody loses their assignments.
+  // Exact class + subject pairs per teacher (backfilled once from existing data).
   const { rows: t } = await pool.query(`SELECT to_regclass('public.teacher_assignments') AS exists`);
   if (!t[0].exists) {
     console.log('[startup] Creating teacher_assignments...');
@@ -44,4 +44,12 @@ export async function ensureSchema() {
     `);
     console.log('[startup] teacher_assignments ready.');
   }
+
+  // Individual teacher logins.
+  await pool.query(`
+    ALTER TABLE teachers ADD COLUMN IF NOT EXISTS email text;
+    ALTER TABLE teachers ADD COLUMN IF NOT EXISTS password_hash text;
+    ALTER TABLE teachers ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT true;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_email ON teachers (lower(email)) WHERE email IS NOT NULL;
+  `);
 }
