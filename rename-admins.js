@@ -49,7 +49,11 @@ try {
     await pool.query('COMMIT');
     console.log(`\nDONE. Shared teacher logins removed: ${del.rowCount}. Admin emails renamed: ${n}.\n`);
   }
+<<<<<<< HEAD
 } catch (e) {ss
+=======
+} catch (e) {
+>>>>>>> 0cf90b78a0a74706685173638d2fd83a99148a58
   await pool.query('ROLLBACK').catch(() => {});
   console.error('Error:', e.message);
 }
