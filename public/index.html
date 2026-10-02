@@ -599,8 +599,7 @@ async function addCenter(){
       <div class="panel" style="padding:14px 16px;">
         <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-soft);font-weight:700;">School Admin</div>
         <div style="font-family:'IBM Plex Mono',monospace;font-size:0.85rem;margin:4px 0 12px;">${escapeHtml(center.logins.admin.email)} / ${escapeHtml(center.logins.admin.password)}</div>
-        <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-soft);font-weight:700;">Shared teacher login (old style)</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:0.85rem;margin:4px 0 0;">${escapeHtml(center.logins.teacher.email)} / ${escapeHtml(center.logins.teacher.password)}</div>
+        <div style="font-size:0.82rem;color:var(--text-soft);">Teachers are added under Teachers, each with their own email and password.</div>
       </div><button class="btn gold" style="width:auto;padding:9px 18px;margin-top:14px;" onclick="closeModal()">Got it</button>`);
   }catch(err){ alert(err.message); }
 }
@@ -1203,6 +1202,5 @@ function toggleTheme(){
   applyBrandLogoEverywhere();
 })();
 </script>
-<script src="/overview-patch.js"></script>
 </body>
 </html>
