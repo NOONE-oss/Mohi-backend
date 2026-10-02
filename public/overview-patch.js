@@ -1,125 +1,181 @@
-/* MOHI overview dashboards (School Admin + IT Support).
-   Loaded AFTER the main script in public/index.html; replaces renderOverview().
-   Uses only endpoints your backend already has. */
+/* MOHI overview dashboards v2 (School Admin + IT Support). Loaded after the main script. */
 (function () {
+  const S = (d, x) => `<svg viewBox="0 0 24 24" width="${x || 18}" height="${x || 18}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const IC = {
+    overview: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+    centers: '<path d="M12 21s7-6.2 7-11a7 7 0 10-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+    classes: '<path d="M4 5h7v14H4zM13 5h7v14h-7z"/>',
+    subjects: '<path d="M2 5c3-1 7-1 10 1v14c-3-2-7-2-10-1zM22 5c-3-1-7-1-10 1v14c3-2 7-2 10-1z"/>',
+    teachers: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/>',
+    students: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-4 3-6 7-6s7 2 7 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c3 0 5 1.5 5 5"/>',
+    exams: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM8.5 12h7M8.5 16h7"/>',
+    results: '<path d="M5 20V10M12 20V4M19 20v-7"/>',
+    notifications: '<path d="M6 17V11a6 6 0 1112 0v6l2 2H4z"/><path d="M10 21h4"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>'
+  };
   const css = `
-  .ov-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:6px}
-  .ov-head h2{font-size:2rem;margin:0}
-  .ov-crumb{font-size:.78rem;color:var(--text-soft);margin:0 0 6px}
-  .ov-pill{font-size:.72rem;font-weight:600;padding:3px 10px;border-radius:20px;border:1px solid var(--brand-blue);color:var(--brand-blue)}
-  .ov-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin:18px 0 22px}
-  .ov-card{background:var(--paper-raised);border:1px solid var(--line);border-radius:12px;padding:18px}
-  .ov-card .lbl{font-size:.82rem;color:var(--text-soft)}
-  .ov-card .num{display:block;font-family:'Fraunces',serif;font-size:2.4rem;line-height:1.1;margin:6px 0 4px}
+  body:has(#adminShell.visible) .letterhead{display:none}
+  body:has(#adminShell.visible) .stage{max-width:none;padding:0}
+  #adminShell.visible{min-height:100vh}
+  body.role-school{--ov:#14a8a0;--ov-bg:rgba(20,168,160,.16);--ov-fg:#5eead4}
+  body.role-it{--ov:#2f64d6;--ov-bg:#2f64d6;--ov-fg:#fff}
+  body.role-school .sidebar button.nav-item.active,body.role-it .sidebar button.nav-item.active{background:var(--ov-bg);color:var(--ov-fg)}
+  .sidebar{width:236px}
+  .sidebar button.nav-item{padding:11px 12px;font-size:.93rem}
+  .sidebar button.nav-item svg{flex-shrink:0;opacity:.85}
+  .sb-user{display:flex;align-items:center;gap:10px;margin-top:auto;padding:12px 6px;border-top:1px solid rgba(255,255,255,.1);font-size:.78rem;color:#fff}
+  .sb-user small{display:block;color:#9AA6BF}
+  .sb-user+.logout{margin-top:0!important}
+  .ov-av{width:36px;height:36px;border-radius:50%;background:var(--ov);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0}
+  .main{padding:26px 34px}
+  .ov-top{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  .ov-title{font-family:'Inter',sans-serif;font-weight:800;font-size:2.1rem;margin:0;letter-spacing:-.01em}
+  .ov-pill{font-size:.74rem;font-weight:600;padding:3px 11px;border-radius:20px;border:1px solid var(--ov);color:var(--ov);margin-left:12px;vertical-align:middle;white-space:nowrap}
+  .ov-tools{display:flex;align-items:center;gap:12px}
+  .ov-search{display:flex;align-items:center;gap:8px;background:var(--paper-raised);border:1px solid var(--line);border-radius:10px;padding:0 12px;color:var(--text-soft)}
+  .ov-search input{border:none;background:none;margin:0;padding:10px 0;width:170px;outline:none;color:var(--text);font-size:.88rem}
+  .ov-bell{position:relative;color:var(--text);display:inline-flex}
+  .ov-bell i{position:absolute;top:-1px;right:-1px;width:8px;height:8px;border-radius:50%;background:var(--ov)}
+  .ov-crumb{font-size:.78rem;color:var(--text-soft);margin:0 0 4px}
+  .ov-lede{color:var(--text-soft);font-size:.92rem;margin:4px 0 0}
+  .ov-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin:22px 0}
+  .ov-card{background:var(--paper-raised);border:1px solid var(--line);border-radius:14px;padding:18px 20px;text-align:center}
+  .ov-card:first-child{border-color:var(--ov)}
+  .ov-card .ic{display:block;margin:0 auto 6px;width:fit-content}
+  .ov-card .lbl{font-size:.88rem;color:var(--text-soft)}
+  .ov-card .num{display:block;font-family:'Inter',sans-serif;font-weight:800;font-size:2.7rem;line-height:1.15;margin:4px 0}
   .ov-card .sub{font-size:.76rem;color:var(--text-soft)}
-  .ov-card:nth-child(1){border-top:3px solid var(--accent-blue)}
-  .ov-card:nth-child(2){border-top:3px solid var(--accent-purple)}
-  .ov-card:nth-child(3){border-top:3px solid var(--accent-orange)}
-  .ov-card:nth-child(4){border-top:3px solid var(--accent-green)}
+  .ov-card:nth-child(1) .ic{color:#2dd4bf}.ov-card:nth-child(2) .ic{color:#a78bfa}.ov-card:nth-child(3) .ic{color:#fb923c}.ov-card:nth-child(4) .ic{color:#34d399}
   .ov-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:18px;align-items:start}
-  @media(max-width:900px){.ov-grid{grid-template-columns:1fr}}
-  .ov-bar{display:grid;grid-template-columns:110px 1fr 46px;gap:10px;align-items:center;margin:10px 0;font-size:.85rem}
+  .ov-grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+  @media(max-width:960px){.ov-grid,.ov-grid2{grid-template-columns:1fr}.main{padding:20px 16px}}
+  .ov-panel{background:var(--paper-raised);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:18px}
+  .ov-panel h3{font-family:'Inter',sans-serif;font-weight:700;font-size:1.15rem;margin:0 0 4px}
+  .ov-panel .cap{font-size:.8rem;color:var(--text-soft);margin:0 0 14px}
+  .ov-panel table{white-space:nowrap}
+  .ov-panel td,.ov-panel th{padding:11px 10px}
+  .ov-panel td.n{color:var(--text-soft);width:26px}
+  .ov-tw{overflow-x:auto}
+  .ov-grid .xc,.ov-grid .xt{display:none}
+  .ov-grid .ov-act~.ov-panel table{white-space:normal}
+  .ov-pillst{white-space:nowrap}
+  .ov-pillst{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;font-weight:600;padding:3px 11px;border-radius:20px;background:rgba(74,201,122,.16);color:#4ac97a}
+  .ov-pillst.off{background:rgba(255,255,255,.07);color:var(--text-soft)}
+  .ov-pillst.bad{background:rgba(226,100,100,.18);color:#f08a8a}
+  .ov-pillst:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+  .g{color:#4ac97a;font-weight:600}.w{color:#e2984a;font-weight:600}
+  .ov-bar{display:grid;grid-template-columns:110px 1fr 46px;gap:12px;align-items:center;margin:14px 0;font-size:.88rem}
   .ov-bar .track{height:10px;background:var(--line);border-radius:6px;overflow:hidden}
-  .ov-bar .fill{height:100%;background:var(--brand-blue);border-radius:6px}
-  .ov-bar .v{text-align:right;font-family:'IBM Plex Mono',monospace;font-size:.78rem}
-  .ov-actions button{display:block;width:100%;margin-bottom:10px;text-align:left}
-  .ov-actions button:first-child{background:var(--brand-blue-deep);color:#fff;border:none}
+  .ov-bar .fill{height:100%;background:#3b74e8;border-radius:6px}
+  .ov-bar .v{text-align:right;font-weight:600}
+  .ov-act button{display:flex;align-items:center;gap:8px;width:100%;margin-bottom:10px;padding:12px 14px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--text);font-weight:600;font-size:.9rem;cursor:pointer;font-family:inherit}
+  .ov-act button:first-of-type{background:var(--ov);border-color:var(--ov);color:#fff}
+  .ov-list{margin:0;padding-left:18px;font-size:.88rem;line-height:1.9;color:var(--text)}
+  .ov-list li::marker{color:var(--ov)}
   `;
-  const st = document.createElement('style');
-  st.textContent = css;
-  document.head.appendChild(st);
+  const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
 
   const avg = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
   const fmt = v => (v == null ? '—' : v.toFixed(0) + '%');
-  const go = view => { const b = document.querySelector(`.nav-item[data-view="${view}"]`); if (b) b.click(); };
-  window.ovGo = go;
+  const cls = v => (v == null ? '' : v >= 70 ? 'g' : v < 50 ? 'w' : '');
+  window.ovGo = v => { const b = document.querySelector(`.nav-item[data-view="${v}"]`); if (b) b.click(); };
+  window.ovFilter = q => document.querySelectorAll('#adminMain tbody tr').forEach(r => { r.style.display = r.textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none'; });
+
+  function decorate(centerName) {
+    document.querySelectorAll('.sidebar .nav-item[data-view]').forEach(b => {
+      if (b.dataset.ic) return; b.dataset.ic = 1;
+      b.insertAdjacentHTML('afterbegin', S(IC[b.dataset.view] || IC.overview));
+    });
+    const sb = document.querySelector('.sidebar'); if (!sb) return;
+    let u = document.getElementById('sbUser');
+    if (!u) { u = document.createElement('div'); u.id = 'sbUser'; u.className = 'sb-user'; sb.insertBefore(u, sb.querySelector('.logout')); }
+    const ini = (isItSupport ? 'IT' : 'SA');
+    u.innerHTML = `<span class="ov-av">${ini}</span><span>${isItSupport ? 'IT Support' : 'Center Admin'}<small>${escapeHtml(centerName)}</small></span>`;
+  }
+
+  function trendSvg(pts) {
+    if (pts.length < 2) return '<div class="empty">The trend appears once two exams have marks.</div>';
+    const w = 520, h = 200, p = 38, vs = pts.map(x => x.v);
+    const lo = Math.max(0, Math.floor(Math.min(...vs) / 10) * 10 - 10), hi = Math.min(100, Math.ceil(Math.max(...vs) / 10) * 10 + 10);
+    const X = i => p + i * (w - p - 16) / (pts.length - 1), Y = v => h - 34 - (v - lo) / ((hi - lo) || 1) * (h - 56);
+    const grid = [0, 1, 2, 3].map(i => { const v = lo + (hi - lo) * i / 3; return `<line x1="${p}" x2="${w - 10}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${p - 8}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="var(--text-soft)">${v.toFixed(0)}</text>`; }).join('');
+    const path = pts.map((q, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(q.v).toFixed(1)}`).join(' ');
+    const dots = pts.map((q, i) => `<circle cx="${X(i)}" cy="${Y(q.v)}" r="4" fill="#3b74e8"/><text x="${X(i)}" y="${h - 12}" text-anchor="${i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}" font-size="11" fill="var(--text-soft)">${escapeHtml(q.l.length > 16 ? q.l.slice(0, 15) + '…' : q.l)}</text>`).join('');
+    return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="display:block">${grid}<path d="${path}" fill="none" stroke="#3b74e8" stroke-width="2.5"/>${dots}</svg>`;
+  }
 
   window.renderOverview = async function (main) {
-    const [classes, teachers, students, exams] = await Promise.all([
-      api('/classes'), api('/teachers'), api('/students'), api('/exams')
-    ]);
-    // Marks come from the most recent published exam (or the latest one if none are published)
-    const exam = exams.filter(e => e.is_published).pop() || exams[exams.length - 1] || null;
+    document.body.classList.toggle('role-it', !!isItSupport);
+    document.body.classList.toggle('role-school', !isItSupport);
+    const [classes, teachers, students, exams] = await Promise.all([api('/classes'), api('/teachers'), api('/students'), api('/exams')]);
     const pct = m => (m.percent != null ? m.percent : (m.points / 8) * 100);
+    const used = exams.slice(-6);
+    const data = {}; // examId -> classId -> results[]
+    await Promise.all(used.flatMap(e => classes.map(async c => {
+      let r = []; try { r = await api(`/results?examId=${e.id}&classId=${c.id}`); } catch (x) {}
+      (data[e.id] = data[e.id] || {})[c.id] = r;
+    })));
+    const marksOf = (e, c) => { const o = []; ((data[e.id] || {})[c.id] || []).forEach(r => r.subjects.forEach(s => { if (s.mark) o.push({ p: pct(s.mark), pts: s.mark.points, sub: s.subject.name }); })); return o; };
+    const examAvg = e => avg(classes.flatMap(c => marksOf(e, c)).map(m => m.p));
+    const latest = [...used].reverse().find(e => examAvg(e) != null) || null;
 
-    const bySubject = {};
-    const everyMark = [];
-    const classRows = await Promise.all(classes.map(async c => {
-      let res = [];
-      if (exam) { try { res = await api(`/results?examId=${exam.id}&classId=${c.id}`); } catch (e) {} }
-      const vals = [];
-      res.forEach(r => r.subjects.forEach(x => {
-        if (!x.mark) return;
-        const p = pct(x.mark);
-        vals.push(p);
-        everyMark.push({ p, pts: x.mark.points });
-        (bySubject[x.subject.name] = bySubject[x.subject.name] || []).push(p);
-      }));
+    const all = latest ? classes.flatMap(c => marksOf(latest, c)) : [];
+    const overall = avg(all.map(m => m.p));
+    const passRate = all.length ? all.filter(m => m.pts >= 5).length / all.length * 100 : null;
+    const bySub = {}; all.forEach(m => (bySub[m.sub] = bySub[m.sub] || []).push(m.p));
+    const rows = classes.map(c => {
+      const v = latest ? avg(marksOf(latest, c).map(m => m.p)) : null;
       const t = teachers.find(t => t.id === c.class_teacher_id);
-      return { name: c.name, n: students.filter(s => s.class_id === c.id).length, teacher: t ? t.full_name : '—', avg: avg(vals) };
-    }));
-
-    const overall = avg(everyMark.map(m => m.p));
-    const passRate = everyMark.length ? (everyMark.filter(m => m.pts >= 5).length / everyMark.length) * 100 : null;
+      return { name: c.name, n: students.filter(s => s.class_id === c.id).length, t: t ? t.full_name : '—', v };
+    });
     const center = escapeHtml(currentCenterName || 'your center');
+    decorate(currentCenterName || 'MOHI');
 
-    let cards, extra = '';
-    if (isItSupport) {
-      let org = null;
-      try { org = await api('/centers/org-stats'); } catch (e) {}
-      cards = [
-        ['Total students', org ? org.students : students.length, 'All centers'],
-        ['Total centers', org ? org.centers : '—', 'In the system'],
-        ['Average score', fmt(overall), center + ' only'],
-        ['Pass rate', fmt(passRate), center + ' only']
-      ];
-      if (org) extra = `<div class="panel"><h3>Centers</h3><table><thead><tr><th>Center</th><th>Students</th><th>Teachers</th></tr></thead><tbody>${
-        org.perCenter.map(c => `<tr><td>${escapeHtml(c.name)}</td><td class="pts">${c.student_count}</td><td class="pts">${c.teacher_count}</td></tr>`).join('')
-      }</tbody></table></div>`;
-    } else {
-      cards = [
-        ['Total students', students.length, ''],
-        ['My teachers', teachers.length, ''],
-        ['Classes', classes.length, ''],
-        ['Average', fmt(overall), exam ? escapeHtml(exam.name) : 'No exam yet']
-      ];
-    }
+    let org = null;
+    if (isItSupport) { try { org = await api('/centers/org-stats'); } catch (e) {} }
+    const card = (ic, l, n, s) => `<div class="ov-card"><span class="ic">${S(ic, 26)}</span><span class="lbl">${l}</span><span class="num">${n}</span><span class="sub">${s || '&nbsp;'}</span></div>`;
+    const cards = isItSupport
+      ? card(IC.students, 'Total Students', org ? org.students : students.length, 'All centers') + card(IC.centers, 'Total Centers', org ? org.centers : '—', 'In the system') +
+        card(IC.results, 'Average Score', fmt(overall), center + ' only') + card(IC.exams, 'Pass Rate', fmt(passRate), center + ' only')
+      : card(IC.students, 'Total Students', students.length, '') + card(IC.teachers, 'My Teachers', teachers.length, '') +
+        card(IC.classes, 'Classes', classes.length, '') + card(IC.results, 'Average', fmt(overall), latest ? escapeHtml(latest.name) : 'No marks yet');
 
-    const subjBars = Object.entries(bySubject).map(([n, v]) => [n, avg(v)]).sort((a, b) => b[1] - a[1]);
-    const bars = subjBars.length
-      ? subjBars.map(([n, v]) => `<div class="ov-bar"><span>${escapeHtml(n)}</span><div class="track"><div class="fill" style="width:${v.toFixed(0)}%"></div></div><span class="v">${v.toFixed(0)}%</span></div>`).join('')
-      : '<div class="empty">Subject averages appear once marks are entered.</div>';
+    const bars = Object.entries(bySub).map(([n, v]) => [n, avg(v)]).sort((a, b) => b[1] - a[1])
+      .map(([n, v]) => `<div class="ov-bar"><span>${escapeHtml(n)}</span><div class="track"><div class="fill" style="width:${v.toFixed(0)}%"></div></div><span class="v">${v.toFixed(0)}%</span></div>`).join('') || '<div class="empty">Subject averages appear once marks are entered.</div>';
 
-    const classTable = classRows.length
-      ? `<table><thead><tr><th>Class</th><th>Students</th><th>Class teacher</th><th>Avg score</th><th>Status</th></tr></thead><tbody>${
-        classRows.map(r => `<tr><td>${escapeHtml(r.name)}</td><td>${r.n}</td><td>${escapeHtml(r.teacher)}</td><td class="pts">${fmt(r.avg)}</td>
-          <td><span class="status-pill ${r.avg != null ? 'published' : 'draft'}">${r.avg != null ? '● Marked' : '○ No marks'}</span></td></tr>`).join('')
-      }</tbody></table>`
+    const classTable = rows.length ? `<div class="ov-tw"><table><thead><tr><th></th><th>Class</th><th>Students</th><th>Class teacher</th><th>Avg score</th><th>Status</th></tr></thead><tbody>${
+      rows.map((r, i) => `<tr><td class="n">${i + 1}.</td><td><strong>${escapeHtml(r.name)}</strong></td><td>${r.n} students</td><td>${escapeHtml(r.t)}</td><td class="${cls(r.v)}">${fmt(r.v)}</td>
+        <td><span class="ov-pillst ${r.v == null ? 'off' : ''}">${r.v == null ? 'No marks' : 'Active'}</span></td></tr>`).join('')}</tbody></table></div>`
       : '<div class="empty">No classes yet. Add one under Classes.</div>';
 
-    const examRows = exams.slice(-5).reverse().map(e => `<tr><td>${escapeHtml(e.name)}</td><td>${escapeHtml(e.term || '—')}, ${escapeHtml(e.academic_year || '—')}</td>
-      <td><span class="status-pill ${e.is_published ? 'published' : 'draft'}">${e.is_published ? '● Published' : '○ Draft'}</span></td></tr>`).join('');
+    const examTable = exams.length ? `<div class="ov-tw"><table><thead><tr><th>Exam</th><th class="xt">Term</th><th class="xc">Center</th><th>Average</th><th>Status</th></tr></thead><tbody>${
+      exams.slice(-5).reverse().map(e => { const v = used.includes(e) ? examAvg(e) : null;
+        return `<tr><td><strong>${escapeHtml(e.name)}</strong></td><td class="xt">${escapeHtml(e.term || '—')}, ${escapeHtml(e.academic_year || '—')}</td><td class="xc">${center}</td><td class="${cls(v)}">${fmt(v)}</td>
+        <td><span class="ov-pillst ${e.is_published ? '' : 'off'}">${e.is_published ? 'Published' : 'Draft'}</span></td></tr>`; }).join('')}</tbody></table></div>` : '<div class="empty">No exams yet.</div>';
 
-    main.innerHTML = `
-      <p class="ov-crumb">Dashboard / ${center} / Overview</p>
-      <div class="ov-head"><h2>${isItSupport ? 'Overview' : center + ' overview'}</h2>
-        <span class="ov-pill">${isItSupport ? 'IT Support' : 'Center Admin'}</span></div>
-      <p class="lede">${isItSupport ? 'Performance across MOHI. Use the center switcher above to change center.' : 'Live stats for your center.'}</p>
-      <div class="ov-cards">${cards.map(c => `<div class="ov-card"><span class="lbl">${c[0]}</span><span class="num">${c[1]}</span><span class="sub">${c[2] || '&nbsp;'}</span></div>`).join('')}</div>
-      <div class="ov-grid">
-        <div>
-          <div class="panel"><h3>Classes</h3>${classTable}</div>
-          <div class="panel"><h3>Performance by subject</h3>${bars}</div>
-          ${extra}
-        </div>
-        <div>
-          <div class="panel ov-actions"><h3>Quick actions</h3>
-            <button class="btn" onclick="ovGo('students')">Add student</button>
-            <button class="btn ghost" onclick="ovGo('exams')">Schedule exam</button>
-            <button class="btn ghost" onclick="ovGo('results')">View results</button></div>
-          <div class="panel"><h3>Recent exams</h3>
-            ${examRows ? `<table><tbody>${examRows}</tbody></table>` : '<div class="empty">No exams yet.</div>'}</div>
-        </div>
-      </div>`;
+    const trend = trendSvg(used.map(e => ({ l: e.name, v: examAvg(e) })).filter(x => x.v != null));
+    const activity = exams.slice(-4).reverse().map(e => `<li>${escapeHtml(e.name)} ${e.is_published ? 'results published' : 'created (draft)'}</li>`).join('') || '<li>No activity yet</li>';
+    const centersTbl = org ? `<div class="ov-panel"><h3>Centers</h3><p class="cap">Students and teachers in every center</p><div class="ov-tw"><table><thead><tr><th>Center</th><th>Students</th><th>Teachers</th></tr></thead><tbody>${
+      org.perCenter.map(c => `<tr><td>${escapeHtml(c.name)}</td><td>${c.student_count}</td><td>${c.teacher_count}</td></tr>`).join('')}</tbody></table></div></div>` : '';
+
+    const initials = isItSupport ? 'IT' : 'SA';
+    const head = `<p class="ov-crumb">${isItSupport ? 'MOHI / Analytics' : 'Dashboard / ' + center} / Overview</p>
+      <div class="ov-top"><div><h1 class="ov-title">${isItSupport ? 'Overview' : center + ' - School Admin'}${isItSupport ? '' : '<span class="ov-pill">Center Admin</span>'}</h1>
+        <p class="ov-lede">${isItSupport ? 'Performance analytics across MOHI. Use the center switcher above to change center.' : 'Real-time stats for ' + center}</p></div>
+        <div class="ov-tools"><label class="ov-search">${S(IC.search, 16)}<input placeholder="Search..." oninput="ovFilter(this.value)"></label>
+        <span class="ov-bell">${S(IC.notifications, 22)}<i></i></span><span class="ov-av">${initials}</span></div></div>
+      <div class="ov-cards">${cards}</div>`;
+
+    main.innerHTML = isItSupport
+      ? head + `<div class="ov-grid2"><div class="ov-panel"><h3>Results Trend</h3><p class="cap">Average score per exam, ${center}</p>${trend}</div>
+          <div class="ov-panel"><h3>Performance by Subject</h3><p class="cap">${latest ? escapeHtml(latest.name) : 'No exam with marks yet'}</p>${bars}</div></div>
+        <div class="ov-panel"><h3>Recent Exams</h3>${examTable}</div>${centersTbl}`
+      : head + `<div class="ov-grid"><div>
+          <div class="ov-panel"><h3>Classes at ${center}</h3><p class="cap">Class list for this center only</p>${classTable}</div>
+          <div class="ov-panel"><h3>Performance by Subject</h3><p class="cap">${latest ? escapeHtml(latest.name) : 'No exam with marks yet'}</p>${bars}</div></div>
+        <div><div class="ov-panel ov-act"><h3>Quick Actions</h3><p class="cap"></p>
+            <button onclick="ovGo('students')">${S(IC.students, 16)} Add Student</button><button onclick="ovGo('exams')">${S(IC.exams, 16)} Schedule Exam</button><button onclick="ovGo('results')">${S(IC.results, 16)} View Results</button></div>
+          <div class="ov-panel"><h3>Recent Activity</h3><p class="cap"></p><ul class="ov-list">${activity}</ul></div>
+          <div class="ov-panel"><h3>Recent Exams</h3>${examTable}</div></div></div>`;
   };
 })();
