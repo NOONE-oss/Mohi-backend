@@ -3,7 +3,7 @@ import pg from 'pg';
 
 export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: false,
+      ssl: /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL || '') ? false : { rejectUnauthorized: false },,
   connectionTimeoutMillis: 10000,
   idleTimeoutMillis: 30000,
   keepAlive: true
