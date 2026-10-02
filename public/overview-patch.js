@@ -163,7 +163,7 @@
       <div class="ov-top"><div><h1 class="ov-title">${isItSupport ? 'Overview' : center + ' - School Admin'}${isItSupport ? '' : '<span class="ov-pill">Center Admin</span>'}</h1>
         <p class="ov-lede">${isItSupport ? 'Performance analytics across MOHI. Use the center switcher above to change center.' : 'Real-time stats for ' + center}</p></div>
         <div class="ov-tools"><label class="ov-search">${S(IC.search, 16)}<input placeholder="Search..." oninput="ovFilter(this.value)"></label>
-        <span class="ov-bell">${S(IC.notifications, 22)}<i></i></span><span class="ov-av">${initials}</span></div></div>
+        <span class="ov-bell">${S(IC.notifications, 22)}<i></i></span><button class="ov-av pf-av" data-profile aria-label="Profile">${initials}</button></div></div>
       <div class="ov-cards">${cards}</div>`;
 
     main.innerHTML = isItSupport
@@ -178,4 +178,97 @@
           <div class="ov-panel"><h3>Recent Activity</h3><p class="cap"></p><ul class="ov-list">${activity}</ul></div>
           <div class="ov-panel"><h3>Recent Exams</h3>${examTable}</div></div></div>`;
   };
+})();
+
+/* ===== Profile menu (admin, IT support, teacher): My Profile / Password / Sign Out ===== */
+(function () {
+  const ic = d => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const I = { user: ic('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-6 8-6s8 2 8 6"/>'), lock: ic('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>'), out: ic('<path d="M9 4H5v16h4M16 8l4 4-4 4M20 12H9"/>') };
+  const st = document.createElement('style');
+  st.textContent = `
+  .pf-av{width:38px;height:38px;border-radius:50%;border:none;background:var(--ov,#2f64d6);color:#fff;font-weight:700;font-size:.8rem;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+  #pfFixed{position:fixed;top:12px;right:16px;z-index:70;display:none}
+  body:has(#adminShell.visible):not(.ov-view) #pfFixed{display:inline-flex}
+  body:has(#adminShell.visible) .it-strip{padding-right:64px}
+  .pf-menu{position:fixed;width:232px;background:var(--paper-raised);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 40px -12px rgba(0,0,0,.7);z-index:80;padding:6px 0}
+  .pf-menu .pf-h{padding:14px 18px;border-bottom:1px solid var(--line)}
+  .pf-menu small{display:block;font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-soft);font-weight:700;margin-bottom:3px}
+  .pf-menu b{font-size:.95rem;word-break:break-all}
+  .pf-menu button{display:flex;align-items:center;gap:12px;width:100%;padding:12px 18px;background:none;border:none;color:var(--text);font-size:.92rem;cursor:pointer;font-family:inherit;text-align:left}
+  .pf-menu button:hover{background:rgba(255,255,255,.05)}
+  .pf-menu .pf-sep{border-top:1px solid var(--line);margin:4px 0}
+  .pf-menu button.out{color:#ef5b5b}
+  .pf-row{display:flex;justify-content:space-between;gap:14px;padding:10px 0;border-bottom:1px solid var(--line);font-size:.9rem}
+  .pf-row span{color:var(--text-soft)}.pf-row b{text-align:right;word-break:break-all}
+  `;
+  document.head.appendChild(st);
+  let menu = null, me = null;
+  const esc = v => escapeHtml(v);
+  const nm = () => (me && me.name) || (typeof currentTeacher !== 'undefined' && currentTeacher && currentTeacher.full_name) || (isItSupport ? 'IT Support' : 'Center Admin');
+  const ini = () => nm().split(/\s+|\./).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'U';
+  async function loadMe() { if (!me) { try { me = await api('/auth/me'); } catch (e) { me = null; } } return me; }
+  function hide() { if (menu) { menu.remove(); menu = null; } }
+  function paintAvatars() { document.querySelectorAll('.pf-av').forEach(b => { b.textContent = ini(); }); }
+  function open(btn) {
+    hide();
+    menu = document.createElement('div'); menu.className = 'pf-menu';
+    menu.innerHTML = `<div class="pf-h"><small>Signed in as</small><b>${esc(nm())}</b></div>
+      <button data-a="profile">${I.user} My Profile</button><button data-a="pw">${I.lock} Password</button><div class="pf-sep"></div>
+      <button class="out" data-a="out">${I.out} Sign Out</button>`;
+    document.body.appendChild(menu);
+    const r = btn.getBoundingClientRect();
+    menu.style.top = (r.bottom + 8) + 'px'; menu.style.right = Math.max(8, innerWidth - r.right) + 'px';
+    menu.onclick = e => { const a = e.target.closest('button'); if (!a) return; const k = a.dataset.a; hide(); if (k === 'out') logout(); if (k === 'profile') showProfile(); if (k === 'pw') showPw(); };
+    loadMe().then(() => { if (menu && me && me.name) menu.querySelector('.pf-h b').textContent = me.name; paintAvatars(); });
+  }
+  document.addEventListener('click', e => {
+    const t = e.target.closest('[data-profile]');
+    if (t) { e.stopPropagation(); menu ? hide() : open(t); return; }
+    if (menu && !e.target.closest('.pf-menu')) hide();
+  });
+  async function showProfile() {
+    await loadMe();
+    const rows = me ? [['Name', me.name], ['Email', me.email || '—'], ['Role', me.roleLabel], ['Center', me.center || '—'], me.section ? ['Section', sectionLabel(me.section)] : null, me.phone ? ['Phone', me.phone] : null].filter(Boolean)
+      : [['Name', nm()], ['Role', isItSupport ? 'IT Support' : 'Account']];
+    openModal(`<h3>My profile</h3><div style="margin:8px 0 18px;">${rows.map(r => `<div class="pf-row"><span>${r[0]}</span><b>${esc(r[1])}</b></div>`).join('')}</div>
+      <button class="btn ghost" style="width:auto;padding:9px 18px;" onclick="closeModal()">Close</button>`);
+  }
+  function showPw() {
+    openModal(`<h3>Change password</h3><p>Enter your current password, then choose a new one.</p><div id="pfErr"></div>
+      <label for="pfCur">Current password</label><input type="password" id="pfCur" autocomplete="current-password">
+      <label for="pfNew">New password</label><input type="password" id="pfNew" autocomplete="new-password">
+      <label for="pfNew2">Confirm new password</label><input type="password" id="pfNew2" autocomplete="new-password">
+      <div style="display:flex;gap:10px;"><button class="btn gold" style="width:auto;padding:9px 18px;" onclick="pfSavePw()">Save password</button>
+      <button class="btn ghost" style="width:auto;padding:9px 18px;" onclick="closeModal()">Cancel</button></div>`);
+  }
+  window.pfSavePw = async function () {
+    const g = id => document.getElementById(id).value, cur = g('pfCur'), n1 = g('pfNew'), n2 = g('pfNew2');
+    if (!cur || !n1) return showError('pfErr', 'Fill in all the fields.');
+    if (n1.length < 6) return showError('pfErr', 'New password must be at least 6 characters.');
+    if (n1 !== n2) return showError('pfErr', "New passwords don't match.");
+    try {
+      await api('/auth/change-password', { method: 'POST', body: { currentPassword: cur, newPassword: n1 } });
+      document.getElementById('pfErr').innerHTML = '<div class="status-pill published" style="margin-bottom:14px;">Password changed</div>';
+      setTimeout(closeModal, 1200);
+    } catch (err) { showError('pfErr', err.message); }
+  };
+  function fixedAvatar() {
+    if (!document.getElementById('pfFixed')) { const b = document.createElement('button'); b.id = 'pfFixed'; b.className = 'pf-av'; b.setAttribute('data-profile', ''); document.body.appendChild(b); }
+    paintAvatars();
+  }
+  if (typeof renderAdminView === 'function') {
+    const o = window.renderAdminView;
+    window.renderAdminView = function (v) { document.body.classList.toggle('ov-view', v === 'overview'); fixedAvatar(); loadMe().then(paintAvatars); return o.apply(this, arguments); };
+  }
+  if (typeof enterTeacherShell === 'function') {
+    const o = window.enterTeacherShell;
+    window.enterTeacherShell = function () {
+      const p = o.apply(this, arguments);
+      const b = document.querySelector('#teacherShell .top-welcome > button');
+      if (b) b.outerHTML = `<button class="pf-av" data-profile aria-label="Profile">${ini()}</button>`;
+      loadMe().then(paintAvatars);
+      return p;
+    };
+  }
+  if (typeof logout === 'function') { const o = window.logout; window.logout = function () { me = null; hide(); document.body.classList.remove('ov-view'); return o.apply(this, arguments); }; }
 })();

@@ -169,3 +169,48 @@ authRouter.post('/student/set-password', asyncHandler(async (req, res) => {
   const token = signToken({ sub: claims.sub, role: 'student', centerId: claims.centerId });
   res.json({ token });
 }));
+
+// ---------- PROFILE: who am I + change my own password ----------
+function claimsFrom(req, res) {
+  const h = req.headers.authorization || '';
+  const t = h.startsWith('Bearer ') ? h.slice(7) : null;
+  try { return verifyToken(t); }
+  catch { res.status(401).json({ error: 'Session expired, please sign in again' }); return null; }
+}
+
+authRouter.get('/me', asyncHandler(async (req, res) => {
+  const c = claimsFrom(req, res); if (!c) return;
+  if (c.role === 'admin' || c.role === 'it_support') {
+    const { rows } = await query(
+      `SELECT a.full_name, a.email, ce.name AS center FROM admins a LEFT JOIN centers ce ON ce.id = $2 WHERE a.id = $1`,
+      [c.sub, c.centerId]);
+    if (!rows[0]) return res.status(404).json({ error: 'Account not found' });
+    return res.json({ name: rows[0].full_name, email: rows[0].email, center: rows[0].center,
+      roleLabel: c.role === 'it_support' ? 'IT Support' : 'School Admin' });
+  }
+  if (c.role === 'teacher') {
+    const { rows } = await query(
+      `SELECT t.full_name, t.email, t.phone, t.section, ce.name AS center FROM teachers t LEFT JOIN centers ce ON ce.id = t.center_id WHERE t.id = $1`,
+      [c.sub]);
+    if (!rows[0]) return res.status(404).json({ error: 'Account not found' });
+    return res.json({ name: rows[0].full_name, email: rows[0].email, phone: rows[0].phone,
+      section: rows[0].section, center: rows[0].center, roleLabel: 'Teacher' });
+  }
+  return res.status(403).json({ error: 'Not available for this account' });
+}));
+
+authRouter.post('/change-password', asyncHandler(async (req, res) => {
+  const c = claimsFrom(req, res); if (!c) return;
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Enter your current and new password.' });
+  if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const table = (c.role === 'admin' || c.role === 'it_support') ? 'admins' : c.role === 'teacher' ? 'teachers' : null;
+  if (!table) return res.status(403).json({ error: 'Not available for this account' });
+  const { rows } = await query(`SELECT password_hash FROM ${table} WHERE id = $1`, [c.sub]);
+  if (!rows[0] || !rows[0].password_hash)
+    return res.status(400).json({ error: 'This account has no personal password. Ask your admin to set one.' });
+  if (!(await verifyPassword(currentPassword, rows[0].password_hash)))
+    return res.status(401).json({ error: 'Current password is incorrect' });
+  await query(`UPDATE ${table} SET password_hash = $1 WHERE id = $2`, [await hashPassword(newPassword), c.sub]);
+  res.json({ ok: true });
+}));
