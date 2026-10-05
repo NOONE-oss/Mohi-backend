@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -16,15 +16,16 @@ import { remarksRouter } from './routes/remarks.js';
 import { resultsRouter } from './routes/results.js';
 import { editRequestsRouter } from './routes/editRequests.js';
 import { reportCardRouter } from './routes/reportCard.js';
+import { passwordRequestsRouter } from './routes/passwordRequests.js';
 import { ensureSchema } from './lib/autoMigrate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Safety net: an error thrown inside an async Express route handler that
-// isn't wrapped (see lib/asyncHandler.js — every route below is wrapped, but
+// isn't wrapped (see lib/asyncHandler.js â€” every route below is wrapped, but
 // this is a second line of defense for anything that slips through, now or
 // in a future change) becomes an "unhandled rejection." In Node, that can
-// terminate the entire process by default — turning one bad request into
+// terminate the entire process by default â€” turning one bad request into
 // total downtime (a 502) for every user until the platform restarts it.
 // Logging it here instead keeps the process, and everyone else's requests,
 // alive.
@@ -53,13 +54,14 @@ app.use('/remarks', remarksRouter);
 app.use('/results', resultsRouter);
 app.use('/edit-requests', editRequestsRouter);
 app.use('/report-card', reportCardRouter);
+app.use('/password-requests', passwordRequestsRouter);
 
-// The frontend (public/index.html) is served by this same app — one service,
+// The frontend (public/index.html) is served by this same app â€” one service,
 // one URL, no separate static host and no CORS setup needed. API routes are
 // registered above this, so they always take priority over the static file.
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// Centralized error handler — keeps internal error detail out of API responses.
+// Centralized error handler â€” keeps internal error detail out of API responses.
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
@@ -67,7 +69,7 @@ app.use((err, req, res, next) => {
 
 const port = process.env.PORT || 3001;
 
-// Set up the database automatically before accepting any requests — see
+// Set up the database automatically before accepting any requests â€” see
 // lib/autoMigrate.js. This is what lets the app work on Render's free plan,
 // which has no Shell access to run migration/seed commands by hand.
 ensureSchema()
