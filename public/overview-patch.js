@@ -524,3 +524,76 @@
   `;
   document.head.appendChild(st);
 })();
+
+/* ===== Forgot password (teachers, students, admins): sign-in link, notifications, set temporary password ===== */
+(function () {
+  const e = v => escapeHtml(v);
+  const KIND = { teacher: 'Teacher', student: 'Student', admin: 'Admin' };
+  let list = [];
+  function addLink() {
+    const step = document.getElementById('signinStep'); if (!step || document.getElementById('fpLink')) return;
+    const rem = step.querySelector('.auth-remember'); if (!rem) return;
+    const a = document.createElement('button'); a.type = 'button'; a.id = 'fpLink'; a.className = 'auth-link'; a.textContent = 'Forgot password?';
+    a.style.cssText = 'margin:-6px 0 14px auto;'; a.onclick = openForgot; rem.parentNode.insertBefore(a, rem);
+  }
+  function openForgot() {
+    const v = (document.getElementById('loginId').value || '').trim();
+    openModal(`<h3>Forgot password?</h3><p>Please contact your school admin. Enter your email or CIN number and we will notify them, so they can give you a temporary password. Admins are helped by IT support.</p><div id="fpMsg"></div>
+      <label for="fpId">Email / CIN</label><input type="text" id="fpId" value="${e(v)}" autocomplete="username">
+      <div style="display:flex;gap:10px;"><button class="btn gold" style="width:auto;padding:9px 18px;" onclick="fpSend()">Notify them</button>
+      <button class="btn ghost" style="width:auto;padding:9px 18px;" onclick="closeModal()">Close</button></div>`);
+  }
+  window.fpSend = async function () {
+    const identifier = document.getElementById('fpId').value.trim();
+    if (!identifier) return showError('fpMsg', 'Enter your email or CIN number.');
+    try {
+      const r = await api('/password-requests/forgot', { method: 'POST', body: { identifier }, auth: false });
+      document.getElementById('fpMsg').innerHTML = `<div class="status-pill published" style="margin-bottom:14px;white-space:normal;">${e(r.message)}</div>`;
+    } catch (err) { showError('fpMsg', err.message); }
+  };
+  window.fpOpen = function (i) {
+    const q = list[i]; if (!q) return;
+    const pw = 'Mohi@' + Math.floor(1000 + Math.random() * 9000);
+    const note = q.kind === 'student' ? 'The email goes to the parent or guardian email on file, if there is one.' : q.kind === 'admin' ? 'They can set their own password afterwards from the profile menu.' : 'They will be made to choose a new password at their next sign-in.';
+    openModal(`<h3>Set a temporary password</h3><p>${e(q.full_name)} (${KIND[q.kind]}, ${e(q.identifier)}) asked for help signing in. ${note}</p><div id="fpRes"></div>
+      <label for="fpPw">Temporary password</label><input type="text" id="fpPw" value="${pw}">
+      <div style="display:flex;gap:10px;"><button class="btn gold" style="width:auto;padding:9px 18px;" onclick="fpSet('${q.id}')">Set and email it</button>
+      <button class="btn ghost" style="width:auto;padding:9px 18px;" onclick="closeModal()">Cancel</button></div>`);
+  };
+  window.fpSet = async function (id) {
+    const pw = document.getElementById('fpPw').value.trim();
+    try {
+      const r = await api(`/password-requests/${id}/resolve`, { method: 'POST', body: { password: pw } });
+      document.getElementById('fpRes').innerHTML = `<div class="status-pill published" style="margin-bottom:10px;white-space:normal;">Password set</div>
+        <p style="margin:0 0 6px;">${r.emailed ? 'Emailed to ' + e(r.emailedTo) + '.' : 'No email was sent (email is not set up, or no email is on file), so give this password to them yourself.'}</p>
+        <p style="font-family:'IBM Plex Mono',monospace;font-size:1rem;color:var(--text);margin:0 0 14px;">${e(r.tempPassword)}</p>
+        <button class="btn gold" style="width:auto;padding:9px 18px;" onclick="closeModal();renderNotifications(document.getElementById('adminMain'));refreshPendingBadge();">Done</button>`;
+    } catch (err) { document.getElementById('fpRes').innerHTML = `<div class="error-msg">${e(err.message)}</div>`; }
+  };
+  if (typeof renderNotifications === 'function') {
+    const o = window.renderNotifications;
+    window.renderNotifications = async function (main) {
+      const r = await o.apply(this, arguments);
+      try {
+        list = await api('/password-requests');
+        const it = typeof isItSupport !== 'undefined' && isItSupport;
+        const p = document.createElement('div'); p.className = 'panel';
+        p.innerHTML = `<h3>Password requests (${list.length})</h3>` + (list.length
+          ? `<div class="mark-grid-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Email / CIN</th>${it ? '<th>Center</th>' : ''}<th>Requested</th><th></th></tr></thead><tbody>${list.map((q, i) => `<tr><td>${e(q.full_name)}</td><td><span class="tag">${KIND[q.kind] || q.kind}</span></td><td>${e(q.identifier)}</td>${it ? `<td>${e(q.center_name || '—')}</td>` : ''}<td>${new Date(q.requested_at).toLocaleString()}</td>
+            <td><button class="btn small gold" onclick="fpOpen(${i})">Set temporary password</button></td></tr>`).join('')}</tbody></table></div>`
+          : '<div class="empty">No password requests right now.</div>');
+        const first = main.querySelector('.panel'); first ? main.insertBefore(p, first) : main.appendChild(p);
+      } catch (x) {}
+      return r;
+    };
+  }
+  if (typeof refreshPendingBadge === 'function') {
+    window.refreshPendingBadge = async function () {
+      const el = document.getElementById('pendingBadge'); if (!el) return; let n = 0;
+      try { n += (await api('/edit-requests?status=pending')).length; } catch (x) {}
+      try { n += (await api('/password-requests')).length; } catch (x) {}
+      el.textContent = n ? ` (${n})` : '';
+    };
+  }
+  addLink();
+})();
