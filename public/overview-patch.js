@@ -597,3 +597,45 @@
   }
   addLink();
 })();
+
+/* ===== App offer: register the service worker, then suggest installing / downloading the Android app ===== */
+(function () {
+  if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+  const standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true || (document.referrer || '').startsWith('android-app://');
+  if (standalone) return; // already running as the app
+  const ua = navigator.userAgent, android = /Android/i.test(ua), ios = /iPhone|iPad|iPod/i.test(ua);
+  if (!android && !ios) return; // phones only
+  const st = document.createElement('style');
+  st.textContent = `
+  .ap-btn{display:inline-block;background:linear-gradient(135deg,#0a5c96,#00a3e0);color:#fff!important;border:none;border-radius:10px;padding:10px 16px;font-weight:700;font-size:.88rem;text-decoration:none;cursor:pointer;font-family:inherit}
+  .ap-offer{margin:18px 0 0;padding:14px;border:1px dashed var(--line);border-radius:14px;font-size:.85rem;color:var(--text-soft)}
+  .ap-offer b{display:block;color:var(--text);margin-bottom:8px;font-size:.92rem}
+  .ap-offer small{display:block;margin-top:8px;font-size:.72rem}
+  #appBanner{position:fixed;left:12px;right:12px;bottom:64px;max-width:460px;margin:0 auto;z-index:90;display:flex;align-items:center;gap:12px;background:var(--paper-raised);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:0 14px 34px -10px rgba(0,0,0,.7);font-size:.85rem}
+  #appBanner span{flex:1;color:var(--text)}
+  #appBanner .ap-x{background:none;border:none;color:var(--text-soft);font-size:1.3rem;cursor:pointer;line-height:1}`;
+  document.head.appendChild(st);
+  let deferred = null, apk = false;
+  const dismissed = () => { try { return Date.now() - Number(localStorage.getItem('mohi-app-dismiss') || 0) < 7 * 864e5; } catch (x) { return false; } };
+  const action = () => deferred ? '<button class="ap-btn" onclick="mohiInstall()">Install app</button>'
+    : (apk && android) ? '<a class="ap-btn" href="/downloads/mohi-results.apk" download>Download the Android app</a>'
+    : ios ? '<span>On iPhone: tap Share, then <b>Add to Home Screen</b>.</span>' : '';
+  window.mohiInstall = async function () { if (!deferred) return; deferred.prompt(); try { await deferred.userChoice; } catch (x) {} deferred = null; render(); };
+  window.mohiDismissApp = function () { try { localStorage.setItem('mohi-app-dismiss', Date.now()); } catch (x) {} render(); };
+  function render() {
+    const a = action(), w = document.getElementById('welcomeStep'); let o = document.getElementById('appOffer');
+    if (w && a) {
+      if (!o) { o = document.createElement('div'); o.id = 'appOffer'; o.className = 'ap-offer'; const d = w.querySelector('.auth-dots'); w.insertBefore(o, d); }
+      o.innerHTML = '<b>Get the MOHI app</b>' + a + (!deferred && apk && android ? '<small>Your phone may ask you to allow installs from this site.</small>' : '');
+    } else if (o) o.remove();
+    const inApp = document.querySelector('.app-shell.visible'); let b = document.getElementById('appBanner');
+    if (inApp && a && !dismissed()) {
+      if (!b) { b = document.createElement('div'); b.id = 'appBanner'; document.body.appendChild(b); }
+      b.innerHTML = '<span>Use MOHI as an app on your phone</span>' + a + '<button class="ap-x" onclick="mohiDismissApp()" aria-label="Close">&times;</button>';
+    } else if (b) b.remove();
+  }
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; render(); });
+  window.addEventListener('appinstalled', () => { deferred = null; render(); });
+  if (android) fetch('/downloads/mohi-results.apk', { method: 'HEAD' }).then(r => { apk = r.ok; render(); }).catch(() => {});
+  render(); setInterval(render, 1500);
+})();
