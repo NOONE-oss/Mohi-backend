@@ -416,3 +416,111 @@
     };
   }
 })();
+
+/* ===== Admin: print report cards per class (stream), one per page ===== */
+(function () {
+  const css = `
+  #rcBatch{display:none}
+  @page{size:A4;margin:10mm}
+  @media print{
+    body.rc-batch{background:#fff!important}
+    body.rc-batch .stage,body.rc-batch .letterhead,body.rc-batch .theme-toggle,body.rc-batch .api-banner,body.rc-batch .modal-back,body.rc-batch #pfFixed,body.rc-batch .pf-menu{display:none!important}
+    body.rc-batch #rcBatch{display:block!important;visibility:visible}
+    body.rc-batch #rcBatch *{visibility:visible}
+  }
+  .rcb{font-family:Arial,Helvetica,sans-serif;color:#1a2233;font-size:11.5px;line-height:1.4;background:#fff;page-break-after:always;break-after:page;padding:2px}
+  .rcb:last-child{page-break-after:auto}
+  .rcb .hd{display:flex;justify-content:space-between;gap:12px;border-bottom:2px solid #1a2233;padding-bottom:10px;margin-bottom:10px}
+  .rcb .lg{display:flex;gap:10px;align-items:center}.rcb .lg img{width:46px;height:46px;object-fit:contain}
+  .rcb .org{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:#3e6bb8;font-weight:700}
+  .rcb h1{font-size:17px;margin:2px 0}.rcb .sm{color:#5b6478;font-size:10.5px}
+  .rcb .who{text-align:right;line-height:1.6}
+  .rcb .st{display:flex;gap:22px;margin:8px 0 10px}.rcb .st div{border:1px solid #ccd3dd;border-radius:6px;padding:6px 14px;min-width:90px}
+  .rcb .st b{display:block;font-size:19px}.rcb .st span{font-size:9.5px;text-transform:uppercase;color:#5b6478}
+  .rcb table{width:100%;border-collapse:collapse;margin:4px 0 8px;font-size:inherit}
+  .rcb th{text-align:left;font-size:9.5px;text-transform:uppercase;color:#5b6478;border-bottom:2px solid #ccd3dd;padding:4px 6px}
+  .rcb td{padding:4px 6px;border-bottom:1px solid #e3e7ee}
+  .rcb h3{font-size:12px;margin:10px 0 2px}
+  .rcb .lv{font-weight:700}
+  .rcb .cm{border-left:3px solid #3e6bb8;background:#f4f6fa;padding:7px 10px;margin:8px 0}
+  .rcb .ct{display:flex;gap:12px;margin-top:10px}.rcb .ct div{flex:1;border:1px solid #ccd3dd;border-radius:6px;padding:7px 10px}
+  .rcb .ct small{font-size:9px;text-transform:uppercase;color:#5b6478;font-weight:700;display:block}
+  .rcb .fn{font-size:9.5px;color:#5b6478;margin-top:10px}
+  `;
+  const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+  const LC = { EE: '#2f7d57', ME: '#33507c', AE: '#8a6a22', BE: '#b24444' }, e = v => escapeHtml(v);
+  const lv = s => (s ? s.slice(0, 2) : '');
+
+  async function build(examId, classId, only) {
+    const [exams, classes, teachers, students, res, rem] = await Promise.all([api('/exams'), api('/classes'), api('/teachers'), api('/students'),
+      api(`/results?examId=${examId}&classId=${classId}`), api(`/remarks?examId=${examId}&classId=${classId}`).catch(() => [])]);
+    const exam = exams.find(x => x.id === examId) || {}, cls = classes.find(c => c.id === classId) || {};
+    const hist = await Promise.all(exams.slice(-6).map(x => api(`/results?examId=${x.id}&classId=${classId}`).then(r => ({ x, r })).catch(() => ({ x, r: [] }))));
+    const graded = res.filter(r => r.subjectsGraded > 0), n = graded.length;
+    const list = (only && only !== 'all' ? graded.filter(r => String(r.student.id) === String(only)) : graded).slice().sort((a, b) => a.student.full_name.localeCompare(b.student.full_name));
+    const tch = teachers.find(t => t.id === cls.class_teacher_id), remBy = Object.fromEntries((rem || []).map(x => [x.student_id, x.text]));
+    const dates = [exam.opens_on ? 'Opens ' + exam.opens_on : '', exam.closes_on ? 'Closes ' + exam.closes_on : ''].filter(Boolean).join(' · ');
+    const html = list.map(r => {
+      const sid = r.student.id, s = students.find(x => String(x.id) === String(sid)) || students.find(x => x.full_name === r.student.full_name) || {};
+      const rows = r.subjects.filter(x => x.mark).map(({ subject, mark }) => `<tr><td>${e(subject.name)}</td><td>${mark.percent != null ? mark.percent + '%' : '—'}</td><td>${e(mark.sublevel)}</td><td>${mark.points}</td><td class="lv" style="color:${LC[lv(mark.sublevel)] || '#000'}">${lv(mark.sublevel)}</td></tr>`).join('');
+      const tr = hist.map(h => { const m = h.r.find(q => String(q.student.id) === String(sid)); return m && m.subjectsGraded > 0 ? `<tr><td>${e(h.x.name)}</td><td>${m.meanPoints.toFixed(1)}</td><td>${e(m.meanLevel || '—')}</td><td>${m.position ? '#' + m.position + ' of ' + h.r.filter(q => q.subjectsGraded > 0).length : '—'}</td></tr>` : ''; }).join('');
+      const remark = remBy[sid];
+      return `<div class="rcb"><div class="hd"><div class="lg"><img src="/logo.png" alt=""><div><div class="org">${e(currentCenterName || 'Center')} · Missions of Hope International</div><h1>Report Card — ${e(exam.name)}</h1><div class="sm">${e([exam.term, exam.academic_year].filter(Boolean).join(', '))}${dates ? ' · ' + e(dates) : ''}</div></div></div>
+        <div class="who"><b>${e(r.student.full_name)}</b><br>School ID ${e(s.school_id_number || '—')}<br>${e(cls.name || '')}${cls.section ? ' · ' + e(sectionLabel(cls.section)) : ''}</div></div>
+        <div class="st"><div><b>${r.meanPoints != null ? r.meanPoints.toFixed(1) : '—'}</b><span>Mean points</span></div><div><b>${e(r.meanLevel || '—')}</b><span>Mean grade</span></div><div><b>${r.position ? '#' + r.position : '—'}</b><span>Class position (of ${n})</span></div></div>
+        <table><thead><tr><th>Subject</th><th>%</th><th>Sub-level</th><th>Points</th><th>Level</th></tr></thead><tbody>${rows}</tbody></table>
+        ${remark ? `<div class="cm"><small style="font-weight:700;color:#5b6478;text-transform:uppercase;font-size:9px">Class teacher's comment</small><br>${e(remark)}</div>` : ''}
+        ${tr ? `<h3>Term-over-term</h3><table><thead><tr><th>Exam</th><th>Mean points</th><th>Mean grade</th><th>Position</th></tr></thead><tbody>${tr}</tbody></table>` : ''}
+        <div class="ct"><div><small>Class teacher</small><b>${e(tch ? tch.full_name : 'Not assigned')}</b><br>${e(tch && tch.phone ? tch.phone : '')}</div>
+          <div><small>Parent / guardian</small><b>${e(s.parent_name || '—')}</b><br>${e([s.parent_phone, s.parent_email].filter(Boolean).join(' · '))}</div></div>
+        ${exam.newsletter ? `<div class="cm" style="margin-top:10px">${e(exam.newsletter)}</div>` : ''}
+        <div class="fn">Mean grade and class position are internal MOHI tracking figures. Official CBC/KNEC reporting has no aggregate score or ranking.</div></div>`;
+    }).join('');
+    return { html, count: list.length, none: res.length - n };
+  }
+  window.mohiPrintCards = async function (examId, classId, only) {
+    const { html, count, none } = await build(examId, classId, only);
+    if (!count) throw new Error('No marks have been entered for this class in this exam yet.');
+    let box = document.getElementById('rcBatch');
+    if (!box) { box = document.createElement('div'); box.id = 'rcBatch'; document.body.appendChild(box); }
+    box.innerHTML = html; document.body.classList.add('rc-batch');
+    const done = () => { document.body.classList.remove('rc-batch'); box.innerHTML = ''; window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    setTimeout(() => window.print(), 400);
+    return { count, none };
+  };
+
+  async function addPanel() {
+    const sel = document.getElementById('resultsClassSel'), ex = document.getElementById('resultsExamSel');
+    if (!sel || !ex || document.getElementById('rcPanel')) return;
+    const students = (await api('/students')).filter(s => String(s.class_id) === String(sel.value)).sort((a, b) => a.full_name.localeCompare(b.full_name));
+    const p = document.createElement('div'); p.className = 'panel'; p.id = 'rcPanel';
+    p.innerHTML = `<h3>Print report cards</h3><p class="sub">Prints one report card per page for the class and exam chosen above. In the print window, choose <strong>Save as PDF</strong> to keep a copy.</p>
+      <div class="row-form"><div class="field"><label for="rcWho">Student</label><select id="rcWho"><option value="all">All students in this class</option>${students.map(s => `<option value="${s.id}">${e(s.full_name)}</option>`).join('')}</select></div>
+      <button class="btn" id="rcGo">Print report cards</button></div><div id="rcMsg"></div>`;
+    sel.closest('.select-row').insertAdjacentElement('afterend', p);
+    document.getElementById('rcGo').onclick = async () => {
+      const m = document.getElementById('rcMsg'); m.innerHTML = '<div class="hint">Preparing report cards...</div>';
+      try {
+        const r = await window.mohiPrintCards(ex.value, sel.value, document.getElementById('rcWho').value);
+        m.innerHTML = `<div class="status-pill published">${r.count} report card${r.count === 1 ? '' : 's'} ready</div>` + (r.none ? `<p class="hint" style="margin-top:8px">${r.none} student${r.none === 1 ? ' has' : 's have'} no marks and ${r.none === 1 ? 'was' : 'were'} left out.</p>` : '');
+      } catch (err) { m.innerHTML = `<div class="error-msg" style="margin-top:12px">${e(err.message)}</div>`; }
+    };
+  }
+  if (typeof renderResults === 'function') {
+    const o = window.renderResults;
+    window.renderResults = async function () { const r = await o.apply(this, arguments); try { await addPanel(); } catch (x) {} return r; };
+  }
+})();
+
+/* ===== Student report card: keep the Mean points / Mean grade / Position boxes compact, not stretched ===== */
+(function () {
+  const st = document.createElement('style');
+  st.textContent = `
+  .rc-stats{display:flex;flex-wrap:wrap;gap:14px;justify-content:flex-start;margin:14px 0 20px}
+  .rc-stats .stat{flex:0 0 auto;width:170px;min-width:0;padding:12px 16px}
+  .rc-stats .stat .num{font-size:1.7rem}
+  @media(max-width:560px){.rc-stats .stat{width:calc(50% - 7px)}}
+  `;
+  document.head.appendChild(st);
+})();
