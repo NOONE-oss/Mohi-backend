@@ -272,3 +272,147 @@
   }
   if (typeof logout === 'function') { const o = window.logout; window.logout = function () { me = null; hide(); document.body.classList.remove('ov-view'); return o.apply(this, arguments); }; }
 })();
+
+/* ===== Bulk uploads v2: results in "one row per student" layout + teachers with email and many classes/subjects ===== */
+(function () {
+  const norm = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const delimOf = t => { const l = t.split(/\r?\n/)[0] || ''; const c = { ',': (l.match(/,/g) || []).length, ';': (l.match(/;/g) || []).length, '\t': (l.match(/\t/g) || []).length }; return Object.keys(c).sort((a, b) => c[b] - c[a])[0]; };
+  function parseCSV(t) {
+    t = t.replace(/^\uFEFF/, ''); const d = delimOf(t), rows = []; let r = [], f = '', q = false;
+    for (let i = 0; i < t.length; i++) {
+      const c = t[i];
+      if (q) { if (c === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+      else if (c === '"') q = true;
+      else if (c === d) { r.push(f); f = ''; }
+      else if (c === '\n' || c === '\r') { if (c === '\r' && t[i + 1] === '\n') i++; r.push(f); f = ''; rows.push(r); r = []; }
+      else f += c;
+    }
+    if (f !== '' || r.length) { r.push(f); rows.push(r); }
+    return rows.filter(x => x.some(y => String(y).trim() !== ''));
+  }
+  const ABBR = { eng: 'english', kis: 'kiswahili', kisw: 'kiswahili', mat: 'mathematics', math: 'mathematics', maths: 'mathematics', bio: 'biology', phy: 'physics', chem: 'chemistry', hag: 'history', his: 'history', geo: 'geography', cre: 'christianreligiouseducation', agr: 'agriculture', comp: 'computer', bus: 'business', sci: 'science', ss: 'socialstudies' };
+  const IGNORE = ['entry', 'no', 'studentname', 'name', 'fullname', 'class', 'stream', 'strms', 'streams', 'section', 'position', 'pos', 'total', 'mean', 'average', 'grade', 'rank'];
+  const ID_HEADS = ['schoolid', 'idcin', 'cin', 'id', 'admno', 'admission', 'admissionno', 'schoolidnumber', 'studentid'];
+  function matchSubject(h, subjects) {
+    const n = norm(h); if (!n) return null;
+    let s = subjects.find(x => norm(x.name) === n); if (s) return s;
+    const e = ABBR[n];
+    if (e) { s = subjects.find(x => norm(x.name).includes(e) || (e.startsWith('christian') && norm(x.name).startsWith('cre'))); if (s) return s; }
+    if (n.length >= 3) s = subjects.find(x => norm(x.name).startsWith(n));
+    return s || null;
+  }
+  function wideToLong(text, subjects) {
+    const rows = parseCSV(text); if (rows.length < 2) throw new Error('That file has no data rows.');
+    const head = rows[0], idCol = head.findIndex(h => ID_HEADS.includes(norm(h)));
+    if (idCol < 0) throw new Error('Could not find the School ID column. Name it "School ID" or "ID/CIN".');
+    const cols = [], skipped = [];
+    head.forEach((h, i) => {
+      if (i === idCol || !norm(h) || IGNORE.includes(norm(h))) return;
+      const s = matchSubject(h, subjects);
+      if (s) cols.push({ i, name: s.name }); else skipped.push('Column "' + String(h).trim() + '" does not match any subject, so it was ignored.');
+    });
+    if (!cols.length) throw new Error('No subject columns matched. Your subjects are: ' + subjects.map(s => s.name).join(', ') + '.');
+    const out = [];
+    rows.slice(1).forEach(r => {
+      const id = String(r[idCol] == null ? '' : r[idCol]).trim().replace(/\.0+$/, ''); if (!id) return;
+      cols.forEach(c => { const v = String(r[c.i] == null ? '' : r[c.i]).trim(); if (/^\d+(\.\d+)?$/.test(v) && +v <= 100) out.push([id, c.name, v]); });
+    });
+    return { rows: out, skipped };
+  }
+  window.mohiWideToLong = wideToLong; window.mohiParseCSV = parseCSV;
+  const cap = a => (a.length > 30 ? a.slice(0, 30).concat(['... and ' + (a.length - 30) + ' more']) : a);
+
+  window.importBulkMarksCsv = async function (examId) {
+    const fi = document.getElementById('bulkMarksCsvFile'), box = document.getElementById('bulkMarksResult');
+    try {
+      const text = await readFileAsText(fi), subjects = await api('/subjects');
+      const { rows, skipped } = wideToLong(text, subjects);
+      if (!rows.length) throw new Error('No marks found in that file. Check the subject columns have numbers.');
+      let added = 0; const sk = skipped.slice();
+      for (let i = 0; i < rows.length; i += 600) {
+        box.innerHTML = '<div class="hint">Uploading ' + Math.min(i + 600, rows.length) + ' of ' + rows.length + ' marks...</div>';
+        const csv = ['School ID,Subject,Score'].concat(rows.slice(i, i + 600).map(r => r.map(csvEscape).join(','))).join('\n');
+        const r = await api('/marks/bulk', { method: 'POST', body: { examId, csv } });
+        added += r.added || 0; (r.skipped || []).forEach(x => sk.push(x));
+      }
+      box.innerHTML = csvResultBox(added, cap(sk), 'mark'); fi.value = '';
+    } catch (err) { box.innerHTML = '<div class="error-msg" style="margin-top:12px;">' + escapeHtml(err.message) + '</div>'; }
+  };
+
+  async function marksTemplate() {
+    const [st, cl, sb] = await Promise.all([api('/students'), api('/classes'), api('/subjects')]);
+    const cname = Object.fromEntries(cl.map(c => [c.id, c.name])), subs = sb.length ? sb.map(s => s.name) : ['Mathematics', 'English', 'Kiswahili'];
+    const rows = [['School ID', 'Student Name', 'Class'].concat(subs)];
+    st.slice().sort((a, b) => (cname[a.class_id] || '').localeCompare(cname[b.class_id] || '') || a.full_name.localeCompare(b.full_name))
+      .forEach(s => rows.push([s.school_id_number, s.full_name, cname[s.class_id] || ''].concat(subs.map(() => ''))));
+    if (!st.length) rows.push(['MOHI-0210', 'Peter Kamau', cl[0] ? cl[0].name : 'Grade 7 Joy'].concat(subs.map(() => '')));
+    downloadCSV('mohi-marks-template.csv', rows);
+  }
+
+  const SECTIONS = ['PRIMARY', 'JUNIOR', 'SENIOR'], DEFAULT_PW = 'Teacher@2026';
+  const splitList = v => String(v || '').split(/[;|\/]/).map(x => x.trim()).filter(Boolean);
+  window.importTeachersCsv = async function () {
+    const fi = document.getElementById('teacherCsvFile'), main = document.getElementById('adminMain');
+    try {
+      const text = await readFileAsText(fi), rows = parseCSV(text);
+      const h = rows[0].map(norm), at = names => h.findIndex(x => names.includes(x));
+      const c = { name: at(['fullname', 'name', 'teacher', 'teachername']), email: at(['email', 'emailaddress', 'login']), pw: at(['password', 'defaultpassword']), sec: at(['section']), cls: at(['class', 'classes', 'stream', 'streams']), sub: at(['subject', 'subjects']), ph: at(['phone', 'phonenumber', 'mobile']) };
+      if (c.name < 0 || c.email < 0) throw new Error('The file needs "Full Name" and "Email" columns. Download the template to see the layout.');
+      const [classes, subjects] = await Promise.all([api('/classes'), api('/subjects')]);
+      const people = new Map(), skipped = [];
+      rows.slice(1).forEach((r, k) => {
+        const g = i => (i < 0 ? '' : String(r[i] == null ? '' : r[i]).trim()), email = g(c.email).toLowerCase(), name = g(c.name);
+        if (!name && !email) return;
+        if (!name || !email) { skipped.push('Row ' + (k + 2) + ': needs both a name and an email.'); return; }
+        const p = people.get(email) || { name, email, pw: '', sec: '', ph: '', cls: new Set(), sub: new Set() };
+        p.pw = p.pw || g(c.pw); p.sec = p.sec || g(c.sec); p.ph = p.ph || g(c.ph);
+        splitList(g(c.cls)).forEach(x => p.cls.add(x)); splitList(g(c.sub)).forEach(x => p.sub.add(x));
+        people.set(email, p);
+      });
+      let added = 0;
+      for (const p of people.values()) {
+        const cl = [...p.cls].map(n => ({ n, o: classes.find(x => norm(x.name) === norm(n)) })), sb = [...p.sub].map(n => ({ n, o: matchSubject(n, subjects) }));
+        cl.filter(x => !x.o).forEach(x => skipped.push(p.name + ': class "' + x.n + '" not found.'));
+        sb.filter(x => !x.o).forEach(x => skipped.push(p.name + ': subject "' + x.n + '" not found.'));
+        const assignments = []; cl.filter(x => x.o).forEach(a => sb.filter(x => x.o).forEach(b => assignments.push({ classId: a.o.id, subjectId: b.o.id })));
+        let section = SECTIONS.find(s => norm(p.sec).startsWith(norm(s).slice(0, 3))) || (cl.find(x => x.o) || { o: {} }).o.section || 'JUNIOR';
+        try { await api('/teachers', { method: 'POST', body: { fullName: p.name, email: p.email, password: p.pw || DEFAULT_PW, phone: p.ph, section, assignments } }); added++; }
+        catch (err) { skipped.push(p.name + ' (' + p.email + '): ' + err.message); }
+      }
+      fi.value = '';
+      renderTeachers(main, csvResultBox(added, cap(skipped), 'teacher') + '<p class="hint" style="margin-top:8px;">Teachers with no password in the file got ' + DEFAULT_PW + '.</p>');
+    } catch (err) { renderTeachers(main, '<div class="error-msg" style="margin-top:12px;">' + escapeHtml(err.message) + '</div>'); }
+  };
+  async function teacherTemplate() {
+    const [c, s] = await Promise.all([api('/classes'), api('/subjects')]);
+    const c1 = c[0] ? c[0].name : 'Grade 7 Joy', c2 = c[1] ? c[1].name : 'Grade 7 Love', s1 = s[0] ? s[0].name : 'Mathematics', s2 = s[1] ? s[1].name : 'English';
+    downloadCSV('mohi-teachers-template.csv', [['Full Name', 'Email', 'Password', 'Section', 'Class', 'Subject', 'Phone'],
+      ['Mrs. Grace Wambui', 'grace@mohiafrica.org', '', 'JUNIOR', c1 + '; ' + c2, s1 + '; ' + s2, '0712 345 678'],
+      ['Mr. Peter Otieno', 'peter@mohiafrica.org', '', 'JUNIOR', c1, s2, '0722 111 222']]);
+  }
+
+  function relabel(inputId, html, fn) {
+    const inp = document.getElementById(inputId); if (!inp) return;
+    const panel = inp.closest('.panel'), a = panel && [...panel.querySelectorAll('a')].find(x => /template/i.test(x.textContent));
+    if (!a) return; const p = a.parentElement;
+    a.onclick = () => { fn(); return false; }; p.innerHTML = html + ' '; p.appendChild(a);
+  }
+  if (typeof renderResults === 'function') {
+    const o = window.renderResults;
+    window.renderResults = async function () {
+      const r = await o.apply(this, arguments);
+      const inp = document.getElementById('bulkMarksCsvFile'), st = inp && inp.closest('.panel') && inp.closest('.panel').querySelectorAll('p.sub strong');
+      const exam = st && st.length ? st[st.length - 1].textContent : 'the selected exam';
+      relabel('bulkMarksCsvFile', 'One row per student, one column per subject, like your Excel sheet. Columns: <strong>School ID</strong> (or ID/CIN), Student Name and Class (optional), then a column for each subject. Leave a cell empty, or put - or x, if the student did not sit it. Scores are 0 to 100. Applies to <strong>' + exam + '</strong>.', marksTemplate);
+      return r;
+    };
+  }
+  if (typeof renderTeachers === 'function') {
+    const o = window.renderTeachers;
+    window.renderTeachers = async function () {
+      const r = await o.apply(this, arguments);
+      relabel('teacherCsvFile', 'Columns: <strong>Full Name, Email, Password (optional), Section, Class, Subject, Phone</strong>. A teacher can have many classes and subjects: put several in one cell separated by <strong>;</strong> or repeat the teacher on more rows. Class and subject names must match the ones in the system.', teacherTemplate);
+      return r;
+    };
+  }
+})();
