@@ -16,6 +16,7 @@ import { remarksRouter } from './routes/remarks.js';
 import { resultsRouter } from './routes/results.js';
 import { editRequestsRouter } from './routes/editRequests.js';
 import { reportCardRouter } from './routes/reportCard.js';
+import { studentTransferRouter } from './routes/studentTransfer.js';
 import { passwordRequestsRouter } from './routes/passwordRequests.js';
 import { ensureSchema } from './lib/autoMigrate.js';
 
@@ -54,6 +55,7 @@ app.use('/remarks', remarksRouter);
 app.use('/results', resultsRouter);
 app.use('/edit-requests', editRequestsRouter);
 app.use('/report-card', reportCardRouter);
+app.use('/student-transfer', studentTransferRouter);
 app.use('/password-requests', passwordRequestsRouter);
 
 // The frontend (public/index.html) is served by this same app â€” one service,
