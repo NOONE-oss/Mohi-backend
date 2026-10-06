@@ -301,10 +301,11 @@
     if (n.length >= 3) s = subjects.find(x => norm(x.name).startsWith(n));
     return s || null;
   }
-  function wideToLong(text, subjects) {
+  function wideToLong(text, subjects, ctx) {
     const rows = parseCSV(text); if (rows.length < 2) throw new Error('That file has no data rows.');
     const head = rows[0], idCol = head.findIndex(h => ID_HEADS.includes(norm(h)));
-    if (idCol < 0) throw new Error('Could not find the School ID column. Name it "School ID" or "ID/CIN".');
+    const nameCol = head.findIndex(h => ['studentname', 'name', 'fullname'].includes(norm(h))), clsCol = head.findIndex(h => ['class', 'stream', 'strms', 'streams'].includes(norm(h)));
+    if (idCol < 0 && (nameCol < 0 || !ctx)) throw new Error('Could not find the School ID column. Name it "School ID" or "ID/CIN", or use a "Student Name" column.');
     const cols = [], skipped = [];
     head.forEach((h, i) => {
       if (i === idCol || !norm(h) || IGNORE.includes(norm(h))) return;
@@ -314,7 +315,15 @@
     if (!cols.length) throw new Error('No subject columns matched. Your subjects are: ' + subjects.map(s => s.name).join(', ') + '.');
     const out = [];
     rows.slice(1).forEach(r => {
-      const id = String(r[idCol] == null ? '' : r[idCol]).trim().replace(/\.0+$/, ''); if (!id) return;
+      let id = idCol >= 0 ? String(r[idCol] == null ? '' : r[idCol]).trim().replace(/\.0+$/, '') : '';
+      if (!id && nameCol >= 0 && ctx) {
+        const raw = String(r[nameCol] == null ? '' : r[nameCol]).trim(); if (!raw) return;
+        let m = ctx.byName.get(norm(raw)) || [];
+        if (m.length > 1 && clsCol >= 0) { const f = m.filter(x => ctx.cn[x.class_id] === norm(r[clsCol])); if (f.length) m = f; }
+        if (m.length === 1) id = String(m[0].school_id_number);
+        else { skipped.push('"' + raw + '": ' + (m.length ? 'more than one student has this name, so use the School ID.' : 'no student with this name was found.')); return; }
+      }
+      if (!id) return;
       cols.forEach(c => { const v = String(r[c.i] == null ? '' : r[c.i]).trim(); if (/^\d+(\.\d+)?$/.test(v) && +v <= 100) out.push([id, c.name, v]); });
     });
     return { rows: out, skipped };
@@ -326,7 +335,9 @@
     const fi = document.getElementById('bulkMarksCsvFile'), box = document.getElementById('bulkMarksResult');
     try {
       const text = await readFileAsText(fi), subjects = await api('/subjects');
-      const { rows, skipped } = wideToLong(text, subjects);
+      const [stu, cls] = await Promise.all([api('/students'), api('/classes')]), byName = new Map(), cn = Object.fromEntries(cls.map(x => [x.id, norm(x.name)]));
+      stu.forEach(x => { const k = norm(x.full_name); byName.set(k, (byName.get(k) || []).concat([x])); });
+      const { rows, skipped } = wideToLong(text, subjects, { byName, cn });
       if (!rows.length) throw new Error('No marks found in that file. Check the subject columns have numbers.');
       let added = 0; const sk = skipped.slice();
       for (let i = 0; i < rows.length; i += 600) {
@@ -403,7 +414,7 @@
       const r = await o.apply(this, arguments);
       const inp = document.getElementById('bulkMarksCsvFile'), st = inp && inp.closest('.panel') && inp.closest('.panel').querySelectorAll('p.sub strong');
       const exam = st && st.length ? st[st.length - 1].textContent : 'the selected exam';
-      relabel('bulkMarksCsvFile', 'One row per student, one column per subject, like your Excel sheet. Columns: <strong>School ID</strong> (or ID/CIN), Student Name and Class (optional), then a column for each subject. Leave a cell empty, or put - or x, if the student did not sit it. Scores are 0 to 100. Applies to <strong>' + exam + '</strong>.', marksTemplate);
+      relabel('bulkMarksCsvFile', 'One row per student, one column per subject, like your Excel sheet. Columns: <strong>School ID</strong> (or ID/CIN). If you have no ID, use <strong>Student Name</strong> and Class instead (names must match exactly, and clashes are skipped). Then a column for each subject. Leave a cell empty, or put - or x, if the student did not sit it. Scores are 0 to 100. Applies to <strong>' + exam + '</strong>.', marksTemplate);
       return r;
     };
   }
@@ -638,4 +649,166 @@
   window.addEventListener('appinstalled', () => { deferred = null; render(); });
   if (android) fetch('/downloads/mohi-results.apk', { method: 'HEAD' }).then(r => { apk = r.ok; render(); }).catch(() => {});
   render(); setInterval(render, 1500);
+})();
+
+
+/* ===== Student management (by class / stream, transfers) and teachers by section ===== */
+(function () {
+  const e = v => escapeHtml(v), S = { classId: null, q: '', sel: new Set(), moving: [] }, PER = 60;
+  let CL = [], ST = [];
+  const st = document.createElement('style');
+  st.textContent = `.sec-tabs{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0 14px}.sec-tab{border:1px solid var(--line);background:transparent;color:var(--text);border-radius:20px;padding:6px 14px;font-size:.82rem;cursor:pointer;font-family:inherit}.sec-tab.on{background:var(--brand-blue-deep);color:#fff;border-color:transparent}.sec-tabs input{margin:0 0 0 auto;width:200px;padding:7px 10px}`;
+  document.head.appendChild(st);
+
+  window.renderStudents = async function (main, summaryHtml) {
+    const [students, classes] = await Promise.all([api('/students'), api('/classes')]);
+    ST = students; CL = classes;
+    const cnt = {}; students.forEach(s => { const k = s.class_id || 'none'; cnt[k] = (cnt[k] || 0) + 1; });
+    if (!S.classId || (S.classId !== 'none' && !classes.find(c => c.id === S.classId))) S.classId = (classes.find(c => cnt[c.id]) || classes[0] || {}).id || 'none';
+    const addOpts = classes.map(c => `<option value="${c.id}">${e(c.name)} — ${sectionLabel(c.section)}</option>`).join('');
+    const selOpts = classes.map(c => `<option value="${c.id}" ${c.id === S.classId ? 'selected' : ''}>${e(c.name)} (${cnt[c.id] || 0})</option>`).join('') + (cnt.none ? `<option value="none" ${S.classId === 'none' ? 'selected' : ''}>No class (${cnt.none})</option>` : '');
+    main.innerHTML = `<h2>Students</h2><p class="lede">${students.length} students. New students go into their class; find and manage them by class or stream below. Default password is Student@2026 until changed.</p>
+      <div class="panel"><h3>Add a student</h3><div class="row-form">
+        <div class="field"><label for="newStudentName">Full name</label><input type="text" id="newStudentName" placeholder="e.g. Peter Kamau"></div>
+        <div class="field"><label for="newStudentId">School ID (CIN)</label><input type="text" id="newStudentId" placeholder="e.g. MOHI-0210"></div>
+        <div class="field"><label for="newStudentClass">Class</label><select id="newStudentClass">${addOpts || '<option value="">No classes yet</option>'}</select></div>
+        <button class="btn" onclick="addStudent()">Add student</button></div></div>
+      <div class="panel"><h3>Manage students</h3><div class="row-form">
+        <div class="field"><label for="stuClassSel">Class / stream</label><select id="stuClassSel">${selOpts || '<option>No classes yet</option>'}</select></div>
+        <div class="field"><label for="stuSearch">Search all students</label><input type="text" id="stuSearch" placeholder="Name or School ID" value="${e(S.q)}"></div></div>
+        <div id="stuList"></div></div>
+      <div class="panel"><h3>Bulk upload students (CSV)</h3>
+        <p class="sub">Columns: <strong>Full Name, School ID, Class</strong>. Class must match an existing class name exactly.
+        <a href="#" onclick="downloadCSV('mohi-students-template.csv', [['Full Name','School ID','Class'],['Peter Kamau','MOHI-0210','${classes[0] ? e(classes[0].name) : 'Grade 7 Blue'}']]); return false;">Download CSV template</a></p>
+        <div class="row-form"><div class="field"><label for="studentCsvFile">CSV file</label><input type="file" id="studentCsvFile" accept=".csv,text/csv"></div>
+        <button class="btn small" onclick="importStudentsCsv()">Upload &amp; add students</button></div>${summaryHtml || ''}</div>`;
+    document.getElementById('stuClassSel').onchange = ev => { S.classId = ev.target.value; S.q = ''; document.getElementById('stuSearch').value = ''; S.sel.clear(); draw(); };
+    document.getElementById('stuSearch').oninput = ev => { S.q = ev.target.value; draw(); };
+    draw();
+  };
+  function draw() {
+    const box = document.getElementById('stuList'); if (!box) return;
+    const q = S.q.trim().toLowerCase(), cname = Object.fromEntries(CL.map(c => [c.id, c.name]));
+    let rows = q.length >= 2 ? ST.filter(s => s.full_name.toLowerCase().includes(q) || String(s.school_id_number).toLowerCase().includes(q)) : ST.filter(s => (s.class_id || 'none') === S.classId);
+    rows = rows.slice().sort((a, b) => a.full_name.localeCompare(b.full_name));
+    const total = rows.length; rows = rows.slice(0, PER);
+    box.innerHTML = !total ? '<div class="empty">No students here yet.</div>' : `<div class="row-form" style="margin-bottom:8px;"><span id="stuCnt" style="font-size:.85rem;color:var(--text-soft);">${S.sel.size} selected</span>
+      <button class="btn small ghost" onclick="stuMove()">Transfer selected</button></div>
+      <div class="mark-grid-wrap"><table><thead><tr><th></th><th>Name</th><th>School ID</th>${q.length >= 2 ? '<th>Class</th>' : ''}<th>Login</th><th></th></tr></thead><tbody>${rows.map(s => `<tr>
+        <td><input type="checkbox" style="margin:0;width:auto;" ${S.sel.has(s.id) ? 'checked' : ''} onchange="stuTick('${s.id}',this.checked)"></td><td>${e(s.full_name)}</td><td><span class="tag">${e(s.school_id_number)}</span></td>
+        ${q.length >= 2 ? `<td>${e(cname[s.class_id] || '—')}</td>` : ''}<td>${s.password_changed ? 'Password set' : 'Default password'}</td>
+        <td style="white-space:nowrap"><button class="btn small ghost" onclick="openEditStudentModal('${s.id}')">Edit</button> <button class="btn small ghost" onclick="stuMove(['${s.id}'])">Transfer</button> <button class="del" onclick="deleteStudent('${s.id}')">Remove</button></td></tr>`).join('')}</tbody></table></div>
+      <p class="hint" style="margin-top:10px;">${total > PER ? `Showing the first ${PER} of ${total}. Type in the search box to find others.` : `${total} student${total === 1 ? '' : 's'}.`}</p>`;
+  }
+  window.stuTick = (id, on) => { on ? S.sel.add(id) : S.sel.delete(id); const c = document.getElementById('stuCnt'); if (c) c.textContent = S.sel.size + ' selected'; };
+  window.stuMove = async function (ids) {
+    ids = ids || [...S.sel]; if (!ids.length) { alert('Tick at least one student first.'); return; }
+    S.moving = ids; let centers = [];
+    if (isItSupport) { try { centers = await api('/centers'); } catch (x) {} }
+    const who = ids.length === 1 ? ((ST.find(s => s.id === ids[0]) || {}).full_name || 'student') : ids.length + ' students';
+    openModal(`<h3>Transfer ${e(who)}</h3><p>Choose where to move ${ids.length === 1 ? 'them' : 'these students'}.${isItSupport ? '' : ' IT support has to approve the move.'}</p><div id="mvErr"></div>
+      ${isItSupport ? `<label for="mvCenter">Center</label><select id="mvCenter" onchange="stuLoadClasses(this.value)">${centers.map(c => `<option value="${c.id}" ${c.id === authCenterId ? 'selected' : ''}>${e(c.name)}</option>`).join('')}</select>` : ''}
+      <label for="mvClass">Class / stream</label><select id="mvClass"></select><p id="mvWarn" class="hint" style="display:none;margin:0 0 14px;"></p>
+      <div style="display:flex;gap:10px;"><button class="btn gold" style="width:auto;padding:9px 18px;" onclick="stuDoMove()">Move</button><button class="btn ghost" style="width:auto;padding:9px 18px;" onclick="closeModal()">Cancel</button></div>`);
+    await window.stuLoadClasses(isItSupport ? authCenterId : null);
+  };
+  window.stuLoadClasses = async function (centerId) {
+    const sel = document.getElementById('mvClass'), other = centerId && centerId !== authCenterId; let list = CL;
+    if (other) { try { list = await api('/student-transfer/classes?centerId=' + centerId); } catch (x) { list = []; } }
+    sel.innerHTML = list.map(c => `<option value="${c.id}">${e(c.name)}</option>`).join('') || '<option value="">No classes in that center</option>';
+    const w = document.getElementById('mvWarn'); if (w) { w.style.display = other ? 'block' : 'none'; w.textContent = "Marks already entered stay with the old center's exams. The student starts fresh in the new center."; }
+  };
+  window.stuDoMove = async function () {
+    const classId = document.getElementById('mvClass').value; if (!classId) return showError('mvErr', 'Choose a class.');
+    try {
+      const r = await api('/student-transfer', { method: 'POST', body: { studentIds: S.moving, classId } }); S.sel.clear();
+      if (r.requested !== undefined) {
+        document.getElementById('genericModalContent').innerHTML = `<h3>${r.requested ? 'Request sent' : 'Nothing sent'}</h3><p>${r.requested ? r.requested + ' transfer request' + (r.requested === 1 ? '' : 's') + ' sent to IT support. The move happens once it is approved.' : 'These students already have a request waiting for approval.'}${r.requested && r.already ? ' ' + r.already + ' already had one waiting.' : ''}</p>
+          <button class="btn gold" style="width:auto;padding:9px 18px;" onclick="closeModal();renderStudents(document.getElementById('adminMain'))">Done</button>`; return;
+      }
+      closeModal(); renderStudents(document.getElementById('adminMain'));
+    }
+    catch (err) { showError('mvErr', err.message); }
+  };
+
+  if (typeof renderTeachers === 'function') {
+    const o = window.renderTeachers;
+    window.renderTeachers = async function () { const r = await o.apply(this, arguments); try { secTabs(document.getElementById('adminMain')); } catch (x) {} return r; };
+  }
+  function secTabs(main) {
+    const t = main && main.querySelector('.mark-grid-wrap table'); if (!t || !t.tBodies[0] || main.querySelector('.sec-tabs')) return;
+    const rows = [...t.tBodies[0].rows], sec = r => { const x = (r.cells[3] || {}).textContent || ''; return /Primary/i.test(x) ? 'PRIMARY' : /Junior/i.test(x) ? 'JUNIOR' : /Senior/i.test(x) ? 'SENIOR' : 'OTHER'; };
+    const tabs = [['ALL', 'All'], ['PRIMARY', 'Primary'], ['JUNIOR', 'Junior'], ['SENIOR', 'Senior']], n = k => k === 'ALL' ? rows.length : rows.filter(r => sec(r) === k).length;
+    const bar = document.createElement('div'); bar.className = 'sec-tabs';
+    bar.innerHTML = tabs.map(([k, l], i) => `<button class="sec-tab ${i ? '' : 'on'}" data-k="${k}">${l} (${n(k)})</button>`).join('') + '<input type="text" placeholder="Search teachers">';
+    let key = 'ALL', q = '';
+    const apply = () => { let i = 0; rows.forEach(r => { const show = (key === 'ALL' || sec(r) === key) && r.textContent.toLowerCase().includes(q); r.style.display = show ? '' : 'none'; if (show) { const c = r.querySelector('.idx'); if (c) c.textContent = String(++i).padStart(2, '0'); } }); };
+    bar.onclick = ev => { const b = ev.target.closest('.sec-tab'); if (!b) return; key = b.dataset.k; bar.querySelectorAll('.sec-tab').forEach(x => x.classList.toggle('on', x === b)); apply(); };
+    bar.querySelector('input').oninput = ev => { q = ev.target.value.toLowerCase(); apply(); };
+    t.closest('.mark-grid-wrap').insertAdjacentElement('beforebegin', bar);
+  }
+})();
+
+
+/* ===== Transfer approvals (Notifications) + class teacher sees the whole class's results ===== */
+(function () {
+  const e = v => escapeHtml(v);
+  let trList = [];
+  window.trAct = async function (id, act) {
+    try { await api(`/student-transfer/requests/${id}/${act}`, { method: 'POST' }); renderNotifications(document.getElementById('adminMain')); refreshPendingBadge(); }
+    catch (err) { alert(err.message); }
+  };
+  if (typeof renderNotifications === 'function') {
+    const o = window.renderNotifications;
+    window.renderNotifications = async function (main) {
+      const r = await o.apply(this, arguments);
+      try {
+        trList = await api('/student-transfer/requests');
+        const it = isItSupport;
+        const p = document.createElement('div'); p.className = 'panel';
+        p.innerHTML = `<h3>Student transfer requests (${trList.length})</h3>` + (trList.length
+          ? `<div class="mark-grid-wrap"><table><thead><tr><th>Student</th><th>From</th><th>To</th><th>Requested</th><th></th></tr></thead><tbody>${trList.map(q => `<tr><td>${e(q.full_name)} <span class="tag">${e(q.school_id_number)}</span></td>
+              <td>${e(q.from_center || '')} ${e(q.from_class || '—')}</td><td>${e(q.to_center || '')} ${e(q.to_class || '—')}</td><td>${new Date(q.requested_at).toLocaleString()}</td>
+              <td>${it ? `<button class="btn small gold" onclick="trAct('${q.id}','approve')">Approve</button> <button class="btn small ghost" onclick="trAct('${q.id}','reject')">Reject</button>` : '<span class="tag">Waiting for IT support</span>'}</td></tr>`).join('')}</tbody></table></div>`
+          : '<div class="empty">No transfer requests right now.</div>');
+        const first = main.querySelector('.panel'); first ? main.insertBefore(p, first) : main.appendChild(p);
+      } catch (x) {}
+      return r;
+    };
+  }
+  if (typeof refreshPendingBadge === 'function') {
+    const o = window.refreshPendingBadge;
+    window.refreshPendingBadge = async function () {
+      await o.apply(this, arguments);
+      if (!isItSupport) return;
+      try {
+        const n = (await api('/student-transfer/requests')).length, el = document.getElementById('pendingBadge'); if (!el || !n) return;
+        const cur = Number((el.textContent.match(/\d+/) || [0])[0]); el.textContent = ` (${cur + n})`;
+      } catch (x) {}
+    };
+  }
+
+  // Class teacher: whole-class results under the mark entry
+  let ctSel = null;
+  async function ctPanel() {
+    const sel = document.getElementById('teacherExamSel'), main = document.getElementById('teacherMain'); if (!sel || !main) return;
+    const old = document.getElementById('ctPanel'); if (old) old.remove();
+    let mine = []; try { mine = await api('/student-transfer/class-results/mine'); } catch (x) { return; }
+    if (!mine.length) return;
+    const cid = mine.find(c => c.id === ctSel) ? ctSel : mine[0].id;
+    const p = document.createElement('div'); p.className = 'panel'; p.id = 'ctPanel'; p.innerHTML = '<div class="spinner-row">Loading class results...</div>'; main.appendChild(p);
+    let d; try { d = await api(`/student-transfer/class-results?examId=${sel.value}&classId=${cid}`); } catch (err) { p.innerHTML = `<h3>Class results</h3><div class="error-msg">${e(err.message)}</div>`; return; }
+    const cols = d.subjects.map(s => `<th>${e(s.name)}</th>`).join('');
+    const rows = d.results.map(r => `<tr><td class="rank">${r.position ? '#' + r.position : '—'}</td><td>${e(r.student.full_name)}</td>${d.subjects.map(s => { const m = r.marks[s.id]; return `<td class="pts">${m ? (m.percent != null ? m.percent + '% · ' : '') + e(m.sublevel || '') : '—'}</td>`; }).join('')}
+      <td class="pts">${r.meanPoints != null ? r.meanPoints.toFixed(1) : '—'}</td><td>${r.meanLevel ? `<span class="level-chip ${r.meanLevel}">${r.meanLevel}</span>` : '—'}</td></tr>`).join('');
+    p.innerHTML = `<h3>Class results — ${e(d.class.name)}</h3><p class="sub">You are the class teacher, so you can see every subject for this class. Shown for the exam selected above.</p>
+      ${mine.length > 1 ? `<div class="row-form"><div class="field"><label for="ctClassSel">Class</label><select id="ctClassSel">${mine.map(c => `<option value="${c.id}" ${c.id === cid ? 'selected' : ''}>${e(c.name)}</option>`).join('')}</select></div></div>` : ''}
+      ${d.results.length ? `<div class="mark-grid-wrap"><table class="mark-grid"><thead><tr><th>Pos</th><th>Student</th>${cols}<th>Mean pts</th><th>Mean grade</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty">No students in this class yet.</div>'}
+      <p class="hint" style="margin-top:12px;">Mean grade and position are internal MOHI tracking figures.</p>`;
+    const cs = document.getElementById('ctClassSel'); if (cs) cs.onchange = ev => { ctSel = ev.target.value; ctPanel(); };
+  }
+  if (typeof renderTeacherMain === 'function') {
+    const o = window.renderTeacherMain;
+    window.renderTeacherMain = async function () { const r = await o.apply(this, arguments); try { await ctPanel(); } catch (x) {} return r; };
+  }
 })();
