@@ -1,4 +1,4 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import { query } from '../lib/db.js';
 import { hashPassword, verifyPassword, signToken, verifyToken } from '../lib/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
@@ -63,8 +63,8 @@ authRouter.post('/login', asyncHandler(async (req, res) => {
   }
 
   const s = await query(
-    `SELECT id, center_id, full_name, password_hash, password_changed FROM students WHERE school_id_number = $1`, [id]);
-  const student = s.rows[0];
+    `SELECT id, center_id, full_name, password_hash, password_changed FROM students WHERE upper(school_id_number) = ANY($1)`, [idCandidates(id)]);
+  const student = s.rows.length === 1 ? s.rows[0] : undefined;
   if (!student || !(await verifyPassword(password, student.password_hash))) return bad();
 
   if (!student.password_changed) {
@@ -214,3 +214,9 @@ authRouter.post('/change-password', asyncHandler(async (req, res) => {
   await query(`UPDATE ${table} SET password_hash = $1 WHERE id = $2`, [await hashPassword(newPassword), c.sub]);
   res.json({ ok: true });
 }));
+
+function idCandidates(raw) {
+  const v = String(raw).trim().toUpperCase(), c = [v];
+  if (/^\d+$/.test(v)) c.push('MOHI-' + v, 'MOHI-' + v.padStart(4, '0'));
+  return [...new Set(c)];
+}

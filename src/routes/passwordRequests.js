@@ -66,8 +66,10 @@ passwordRequestsRouter.post('/forgot', asyncHandler(async (req, res) => {
       if (t.rows[0]) who = { kind: 'teacher', id: t.rows[0].id, center: t.rows[0].center_id, name: t.rows[0].full_name, ident: email };
     }
   } else {
-    const s = await query(`SELECT id, center_id, full_name FROM students WHERE school_id_number = $1`, [idf]);
-    if (s.rows[0]) who = { kind: 'student', id: s.rows[0].id, center: s.rows[0].center_id, name: s.rows[0].full_name, ident: idf };
+    const v = idf.toUpperCase(), cand = [v];
+    if (/^\d+$/.test(v)) cand.push('MOHI-' + v, 'MOHI-' + v.padStart(4, '0'));
+    const s = await query(`SELECT id, center_id, full_name, school_id_number FROM students WHERE upper(school_id_number) = ANY($1)`, [cand]);
+    if (s.rows.length === 1) who = { kind: 'student', id: s.rows[0].id, center: s.rows[0].center_id, name: s.rows[0].full_name, ident: s.rows[0].school_id_number };
   }
   if (who) {
     const dupe = await query(`SELECT 1 FROM pw_requests WHERE person_id = $1 AND kind = $2 AND status = 'PENDING'`, [who.id, who.kind]);

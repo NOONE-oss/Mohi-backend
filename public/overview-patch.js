@@ -324,6 +324,7 @@
         else { skipped.push('"' + raw + '": ' + (m.length ? 'more than one student has this name, so use the School ID.' : 'no student with this name was found.')); return; }
       }
       if (!id) return;
+      if (ctx && ctx.fix) id = ctx.fix(id);
       cols.forEach(c => { const v = String(r[c.i] == null ? '' : r[c.i]).trim(); if (/^\d+(\.\d+)?$/.test(v) && +v <= 100) out.push([id, c.name, v]); });
     });
     return { rows: out, skipped };
@@ -337,7 +338,9 @@
       const text = await readFileAsText(fi), subjects = await api('/subjects');
       const [stu, cls] = await Promise.all([api('/students'), api('/classes')]), byName = new Map(), cn = Object.fromEntries(cls.map(x => [x.id, norm(x.name)]));
       stu.forEach(x => { const k = norm(x.full_name); byName.set(k, (byName.get(k) || []).concat([x])); });
-      const { rows, skipped } = wideToLong(text, subjects, { byName, cn });
+      const idMap = new Map(stu.map(x => [String(x.school_id_number).toUpperCase(), String(x.school_id_number)]));
+      const fix = v => { const u = String(v).toUpperCase(); if (idMap.has(u)) return idMap.get(u); if (/^\d+$/.test(u)) { for (const c of ['MOHI-' + u, 'MOHI-' + u.padStart(4, '0')]) if (idMap.has(c)) return idMap.get(c); } return v; };
+      const { rows, skipped } = wideToLong(text, subjects, { byName, cn, fix });
       if (!rows.length) throw new Error('No marks found in that file. Check the subject columns have numbers.');
       let added = 0; const sk = skipped.slice();
       for (let i = 0; i < rows.length; i += 600) {
@@ -670,7 +673,7 @@
     main.innerHTML = `<h2>Students</h2><p class="lede">${students.length} students. New students go into their class; find and manage them by class or stream below. Default password is Student@2026 until changed.</p>
       <div class="panel"><h3>Add a student</h3><div class="row-form">
         <div class="field"><label for="newStudentName">Full name</label><input type="text" id="newStudentName" placeholder="e.g. Peter Kamau"></div>
-        <div class="field"><label for="newStudentId">School ID (CIN)</label><input type="text" id="newStudentId" placeholder="e.g. MOHI-0210"></div>
+        <div class="field"><label for="newStudentId">School ID (CIN)</label><input type="text" id="newStudentId" placeholder="e.g. MOHI-0210 or just 0210"></div>
         <div class="field"><label for="newStudentClass">Class</label><select id="newStudentClass">${addOpts || '<option value="">No classes yet</option>'}</select></div>
         <button class="btn" onclick="addStudent()">Add student</button></div></div>
       <div class="panel"><h3>Manage students</h3><div class="row-form">
@@ -811,4 +814,28 @@
     const o = window.renderTeacherMain;
     window.renderTeacherMain = async function () { const r = await o.apply(this, arguments); try { await ctPanel(); } catch (x) {} return r; };
   }
+})();
+
+
+/* ===== Student IDs: type the full ID (MOHI-0210) or just the number (0210) ===== */
+(function () {
+  const fixId = v => { v = String(v == null ? '' : v).trim().replace(/\.0+$/, ''); return /^\d+$/.test(v) ? 'MOHI-' + v.padStart(4, '0') : v; };
+  window.mohiFixId = fixId;
+  window.addStudent = async function () {
+    const g = id => document.getElementById(id);
+    const fullName = g('newStudentName').value.trim(), schoolIdNumber = fixId(g('newStudentId').value), classId = g('newStudentClass').value;
+    if (!fullName || !schoolIdNumber) return;
+    try { await api('/students', { method: 'POST', body: { fullName, schoolIdNumber, classId } }); renderStudents(document.getElementById('adminMain')); }
+    catch (err) { alert(err.message); }
+  };
+  window.importStudentsCsv = async function () {
+    const fi = document.getElementById('studentCsvFile'), main = document.getElementById('adminMain');
+    try {
+      const text = await readFileAsText(fi), rows = window.mohiParseCSV(text);
+      const h = rows[0].map(x => String(x).toLowerCase().replace(/[^a-z0-9]/g, '')), ic = h.findIndex(x => ['schoolid', 'idcin', 'cin', 'id', 'schoolidnumber', 'admissionno', 'admno'].includes(x));
+      if (ic >= 0) rows.slice(1).forEach(r => { r[ic] = fixId(r[ic]); });
+      const result = await api('/students/bulk', { method: 'POST', body: { csv: rows.map(r => r.map(csvEscape).join(',')).join('\n') } });
+      fi.value = ''; renderStudents(main, csvResultBox(result.added, result.skipped, 'student'));
+    } catch (err) { renderStudents(main, `<div class="error-msg" style="margin-top:12px;">${escapeHtml(err.message)}</div>`); }
+  };
 })();
