@@ -680,6 +680,8 @@
         <div class="field"><label for="stuClassSel">Class / stream</label><select id="stuClassSel">${selOpts || '<option>No classes yet</option>'}</select></div>
         <div class="field"><label for="stuSearch">Search all students</label><input type="text" id="stuSearch" placeholder="Name or School ID" value="${e(S.q)}"></div></div>
         <div id="stuList"></div></div>
+      <div class="panel" id="dupPanel"><h3>Duplicate IDs</h3><p class="sub">Every ID must be unique across all centers. Find students whose ID is used more than once (for example MOHI-025100 and 025100) and delete the extras.</p>
+        <div class="row-form"><button class="btn small" onclick="dupScan()">Find duplicates</button><button class="btn small ghost" onclick="idFix()">Add MOHI- to IDs that are only numbers</button></div><div id="dupOut"></div></div>
       <div class="panel"><h3>Bulk upload students (CSV)</h3>
         <p class="sub">Columns: <strong>Full Name, School ID, Class</strong>. Class must match an existing class name exactly.
         <a href="#" onclick="downloadCSV('mohi-students-template.csv', [['Full Name','School ID','Class'],['Peter Kamau','MOHI-0210','${classes[0] ? e(classes[0].name) : 'Grade 7 Blue'}']]); return false;">Download CSV template</a></p>
@@ -694,15 +696,59 @@
     const q = S.q.trim().toLowerCase(), cname = Object.fromEntries(CL.map(c => [c.id, c.name]));
     let rows = q.length >= 2 ? ST.filter(s => s.full_name.toLowerCase().includes(q) || String(s.school_id_number).toLowerCase().includes(q)) : ST.filter(s => (s.class_id || 'none') === S.classId);
     rows = rows.slice().sort((a, b) => a.full_name.localeCompare(b.full_name));
-    const total = rows.length; rows = rows.slice(0, PER);
+    const total = rows.length; S.all = rows.map(s => s.id); rows = rows.slice(0, PER);
     box.innerHTML = !total ? '<div class="empty">No students here yet.</div>' : `<div class="row-form" style="margin-bottom:8px;"><span id="stuCnt" style="font-size:.85rem;color:var(--text-soft);">${S.sel.size} selected</span>
-      <button class="btn small ghost" onclick="stuMove()">Transfer selected</button></div>
-      <div class="mark-grid-wrap"><table><thead><tr><th></th><th>Name</th><th>School ID</th>${q.length >= 2 ? '<th>Class</th>' : ''}<th>Login</th><th></th></tr></thead><tbody>${rows.map(s => `<tr>
+      <button class="btn small ghost" onclick="stuMove()">Transfer selected</button> <button class="btn small ghost" style="color:var(--error)" onclick="stuDelete()">Delete selected</button></div>
+      <div class="mark-grid-wrap"><table><thead><tr><th><input type="checkbox" style="margin:0;width:auto;" title="Select all" ${S.all.length && S.all.every(i => S.sel.has(i)) ? 'checked' : ''} onchange="stuAll(this.checked)"></th><th>Name</th><th>School ID</th>${q.length >= 2 ? '<th>Class</th>' : ''}<th>Login</th><th></th></tr></thead><tbody>${rows.map(s => `<tr>
         <td><input type="checkbox" style="margin:0;width:auto;" ${S.sel.has(s.id) ? 'checked' : ''} onchange="stuTick('${s.id}',this.checked)"></td><td>${e(s.full_name)}</td><td><span class="tag">${e(s.school_id_number)}</span></td>
         ${q.length >= 2 ? `<td>${e(cname[s.class_id] || '—')}</td>` : ''}<td>${s.password_changed ? 'Password set' : 'Default password'}</td>
         <td style="white-space:nowrap"><button class="btn small ghost" onclick="openEditStudentModal('${s.id}')">Edit</button> <button class="btn small ghost" onclick="stuMove(['${s.id}'])">Transfer</button> <button class="del" onclick="deleteStudent('${s.id}')">Remove</button></td></tr>`).join('')}</tbody></table></div>
-      <p class="hint" style="margin-top:10px;">${total > PER ? `Showing the first ${PER} of ${total}. Type in the search box to find others.` : `${total} student${total === 1 ? '' : 's'}.`}</p>`;
+      <p class="hint" style="margin-top:10px;">${total > PER ? `Showing the first ${PER} of ${total}. The top tick box selects all ${total}.` : `${total} student${total === 1 ? '' : 's'}.`}</p>`;
   }
+  window.stuAll = function (on) { S.all.forEach(id => on ? S.sel.add(id) : S.sel.delete(id)); draw(); };
+  async function delStudents(ids) {
+    const r = await api('/student-transfer/delete-students', { method: 'POST', body: { ids } });
+    S.sel.clear(); await renderStudents(document.getElementById('adminMain')); return r;
+  }
+  window.stuDelete = async function () {
+    const ids = [...S.sel]; if (!ids.length) { alert('Tick at least one student first.'); return; }
+    if (!confirm('Delete ' + ids.length + ' student' + (ids.length === 1 ? '' : 's') + '? Their marks are deleted too and this cannot be undone.')) return;
+    if (ids.length >= 10 && (prompt('Type DELETE to confirm removing ' + ids.length + ' students.') || '').trim() !== 'DELETE') return;
+    try { const r = await delStudents(ids); alert(r.deleted + ' deleted.'); } catch (err) { alert(err.message); }
+  };
+  window.deleteStudent = async function (id) {
+    if (!confirm('Remove this student? Their marks are removed too.')) return;
+    try { await delStudents([id]); } catch (err) { alert(err.message); }
+  };
+  window.dupScan = async function () {
+    const out = document.getElementById('dupOut'); out.innerHTML = '<div class="hint">Searching...</div>';
+    let rows; try { rows = await api('/student-transfer/duplicates'); } catch (err) { out.innerHTML = `<div class="error-msg">${e(err.message)}</div>`; return; }
+    if (!rows.length) { out.innerHTML = '<div class="status-pill published">No duplicate IDs found.</div>'; return; }
+    const groups = {}; rows.forEach(r => (groups[r.key] = groups[r.key] || []).push(r));
+    const pre = r => (/^MOHI-/i.test(r.school_id_number) ? 1 : 0);
+    const html = Object.entries(groups).map(([k, g]) => {
+      g.sort((a, b) => (b.marks || 0) - (a.marks || 0) || pre(b) - pre(a));
+      return `<tr><td colspan="6" style="background:rgba(255,255,255,.04);font-weight:600;">ID ${e(k)} is used ${g.length} times</td></tr>` + g.map((r, i) => {
+        const del = i > 0 && r.mine;
+        return `<tr><td><input type="checkbox" class="dupk" data-id="${r.id}" ${del ? 'checked' : ''} ${r.mine ? '' : 'disabled'} style="margin:0;width:auto;"></td><td>${e(r.full_name)}</td><td><span class="tag">${e(r.school_id_number)}</span></td><td>${e(r.class_name || '—')}</td><td>${isItSupport ? e(r.center_name || '—') : ''}</td><td>${r.marks || 0} marks</td></tr>`;
+      }).join('');
+    }).join('');
+    out.innerHTML = `<p class="hint" style="margin:6px 0 10px;">${Object.keys(groups).length} ID(s) are used more than once. In each group the record with the most marks is kept and the others are ticked for deletion. Check the ticks, then delete.${isItSupport ? '' : ' Records in other centers can only be removed by IT support.'}</p>
+      <div class="mark-grid-wrap"><table><thead><tr><th></th><th>Name</th><th>ID</th><th>Class</th><th>${isItSupport ? 'Center' : ''}</th><th>Marks</th></tr></thead><tbody>${html}</tbody></table></div>
+      <div class="row-form" style="margin-top:12px;"><button class="btn small ghost" style="color:var(--error)" onclick="dupDelete()">Delete ticked</button></div>`;
+  };
+  window.dupDelete = async function () {
+    const ids = [...document.querySelectorAll('.dupk:checked')].map(c => c.dataset.id);
+    if (!ids.length) { alert('Nothing is ticked.'); return; }
+    if (!confirm('Delete ' + ids.length + ' duplicate record' + (ids.length === 1 ? '' : 's') + '? This cannot be undone.')) return;
+    try { await delStudents(ids); } catch (err) { alert(err.message); return; }
+    window.dupScan();
+  };
+  window.idFix = async function () {
+    if (!confirm('Add MOHI- in front of IDs that are only numbers? Any that would clash with an existing ID are left alone.')) return;
+    try { const r = await api('/student-transfer/normalize-ids', { method: 'POST' }); await renderStudents(document.getElementById('adminMain')); alert(r.fixed + ' ID(s) updated.'); }
+    catch (err) { alert(err.message); }
+  };
   window.stuTick = (id, on) => { on ? S.sel.add(id) : S.sel.delete(id); const c = document.getElementById('stuCnt'); if (c) c.textContent = S.sel.size + ' selected'; };
   window.stuMove = async function (ids) {
     ids = ids || [...S.sel]; if (!ids.length) { alert('Tick at least one student first.'); return; }
@@ -740,7 +786,9 @@
   }
   function secTabs(main) {
     const t = main && main.querySelector('.mark-grid-wrap table'); if (!t || !t.tBodies[0] || main.querySelector('.sec-tabs')) return;
-    const rows = [...t.tBodies[0].rows], sec = r => { const x = (r.cells[3] || {}).textContent || ''; return /Primary/i.test(x) ? 'PRIMARY' : /Junior/i.test(x) ? 'JUNIOR' : /Senior/i.test(x) ? 'SENIOR' : 'OTHER'; };
+    const hr = t.tHead && t.tHead.rows[0]; if (hr) { const th = document.createElement('th'); th.innerHTML = '<input type="checkbox" id="tchAll" style="margin:0;width:auto;" title="Select all shown">'; hr.insertBefore(th, hr.firstChild); }
+    [...t.tBodies[0].rows].forEach(r => { const m = (r.innerHTML.match(/deleteTeacher\('([^']+)'\)/) || [])[1]; r.insertCell(0).innerHTML = m ? `<input type="checkbox" class="tchk" data-id="${m}" style="margin:0;width:auto;">` : ''; });
+    const rows = [...t.tBodies[0].rows], sec = r => { const x = (r.cells[4] || {}).textContent || ''; return /Primary/i.test(x) ? 'PRIMARY' : /Junior/i.test(x) ? 'JUNIOR' : /Senior/i.test(x) ? 'SENIOR' : 'OTHER'; };
     const tabs = [['ALL', 'All'], ['PRIMARY', 'Primary'], ['JUNIOR', 'Junior'], ['SENIOR', 'Senior']], n = k => k === 'ALL' ? rows.length : rows.filter(r => sec(r) === k).length;
     const bar = document.createElement('div'); bar.className = 'sec-tabs';
     bar.innerHTML = tabs.map(([k, l], i) => `<button class="sec-tab ${i ? '' : 'on'}" data-k="${k}">${l} (${n(k)})</button>`).join('') + '<input type="text" placeholder="Search teachers">';
@@ -749,6 +797,21 @@
     bar.onclick = ev => { const b = ev.target.closest('.sec-tab'); if (!b) return; key = b.dataset.k; bar.querySelectorAll('.sec-tab').forEach(x => x.classList.toggle('on', x === b)); apply(); };
     bar.querySelector('input').oninput = ev => { q = ev.target.value.toLowerCase(); apply(); };
     t.closest('.mark-grid-wrap').insertAdjacentElement('beforebegin', bar);
+    const tb = document.createElement('div'); tb.className = 'sec-tabs';
+    tb.innerHTML = '<span id="tchCnt" style="font-size:.85rem;color:var(--text-soft);">0 selected</span><button class="btn small ghost" id="tchDel" style="color:var(--error)">Delete selected</button>';
+    bar.insertAdjacentElement('afterend', tb);
+    const upd = () => { document.getElementById('tchCnt').textContent = t.querySelectorAll('.tchk:checked').length + ' selected'; };
+    t.addEventListener('change', ev => {
+      if (ev.target.id === 'tchAll') rows.forEach(r => { const c = r.querySelector('.tchk'); if (c && r.style.display !== 'none') c.checked = ev.target.checked; });
+      if (ev.target.id === 'tchAll' || ev.target.classList.contains('tchk')) upd();
+    });
+    document.getElementById('tchDel').onclick = async () => {
+      const ids = [...t.querySelectorAll('.tchk:checked')].map(c => c.dataset.id);
+      if (!ids.length) return alert('Tick at least one teacher first.');
+      if (!confirm('Delete ' + ids.length + ' teacher' + (ids.length === 1 ? '' : 's') + '? This cannot be undone.')) return;
+      let fail = 0; for (const id of ids) { try { await api('/teachers/' + id, { method: 'DELETE' }); } catch (x) { fail++; } }
+      if (fail) alert(fail + ' could not be deleted.'); renderTeachers(main);
+    };
   }
 })();
 
@@ -825,6 +888,7 @@
     const g = id => document.getElementById(id);
     const fullName = g('newStudentName').value.trim(), schoolIdNumber = fixId(g('newStudentId').value), classId = g('newStudentClass').value;
     if (!fullName || !schoolIdNumber) return;
+    try { const t = await api('/student-transfer/id-taken?id=' + encodeURIComponent(schoolIdNumber)); if (t && t.taken) { alert('The ID ' + schoolIdNumber + ' is already used' + (t.mine ? ' by a student in this center.' : ' by a student in another center.') + ' Every ID must be unique across all centers.'); return; } } catch (x) {}
     try { await api('/students', { method: 'POST', body: { fullName, schoolIdNumber, classId } }); renderStudents(document.getElementById('adminMain')); }
     catch (err) { alert(err.message); }
   };
@@ -833,9 +897,67 @@
     try {
       const text = await readFileAsText(fi), rows = window.mohiParseCSV(text);
       const h = rows[0].map(x => String(x).toLowerCase().replace(/[^a-z0-9]/g, '')), ic = h.findIndex(x => ['schoolid', 'idcin', 'cin', 'id', 'schoolidnumber', 'admissionno', 'admno'].includes(x));
-      if (ic >= 0) rows.slice(1).forEach(r => { r[ic] = fixId(r[ic]); });
-      const result = await api('/students/bulk', { method: 'POST', body: { csv: rows.map(r => r.map(csvEscape).join(',')).join('\n') } });
-      fi.value = ''; renderStudents(main, csvResultBox(result.added, result.skipped, 'student'));
+      const skip = []; let keep = rows;
+      if (ic >= 0) {
+        rows.slice(1).forEach(r => { r[ic] = fixId(r[ic]); });
+        const key = v => String(v).trim().toUpperCase().replace(/^MOHI-/, '');
+        let taken = []; try { taken = (await api('/student-transfer/check-ids', { method: 'POST', body: { ids: rows.slice(1).map(r => r[ic]) } })).taken; } catch (x) {}
+        const seen = new Set(); keep = [rows[0]];
+        rows.slice(1).forEach((r, i) => {
+          const k = key(r[ic]);
+          if (!k) { keep.push(r); return; }
+          if (taken.includes(k)) { skip.push('Row ' + (i + 2) + ': ID ' + r[ic] + ' is already used. IDs must be unique across all centers.'); return; }
+          if (seen.has(k)) { skip.push('Row ' + (i + 2) + ': ID ' + r[ic] + ' appears twice in this file.'); return; }
+          seen.add(k); keep.push(r);
+        });
+      }
+      if (keep.length < 2) throw new Error('Nothing to add. ' + (skip[0] || ''));
+      const result = await api('/students/bulk', { method: 'POST', body: { csv: keep.map(r => r.map(csvEscape).join(',')).join('\n') } });
+      fi.value = ''; renderStudents(main, csvResultBox(result.added, skip.concat(result.skipped || []).slice(0, 30), 'student'));
     } catch (err) { renderStudents(main, `<div class="error-msg" style="margin-top:12px;">${escapeHtml(err.message)}</div>`); }
   };
+})();
+
+
+
+/* ===== Phones and small screens only (width up to 720px). Desktop and tablet layouts are not changed. ===== */
+(function () {
+  const st = document.createElement('style');
+  st.textContent = `@media (max-width:720px){
+    html,body{overflow-x:hidden}
+    .sidebar{width:100%;max-width:100%;flex-direction:row;align-items:center;overflow-x:auto;padding:10px;gap:4px;border-right:none;border-bottom:1px solid var(--line)}
+    .sidebar button.nav-item{padding:9px 12px;font-size:.88rem;margin-bottom:0}
+    .sb-user{display:none}
+    .shell-row{width:100%;min-width:0}
+    .main{padding:16px 14px;width:100%}
+    .ov-title{font-size:1.45rem}
+    .ov-pill{margin-left:0;display:inline-block;margin-top:6px}
+    .ov-top{align-items:flex-start}
+    .ov-tools{width:100%}
+    .ov-search{flex:1;min-width:0}.ov-search input{width:100%;min-width:0}
+    .ov-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}
+    .ov-card{padding:14px 10px}.ov-card .num{font-size:2rem}
+    .ov-panel{padding:16px 14px}
+    .ov-bar{grid-template-columns:84px 1fr 40px;gap:8px}
+    #pfFixed{top:8px;right:10px;width:34px;height:34px}
+    body:has(#adminShell.visible) .it-strip{padding-right:52px;flex-wrap:wrap}
+    .it-strip select{max-width:150px}
+    #appBanner{bottom:60px}
+    body:has(#studentShell.visible) .stage,body:has(#teacherShell.visible) .stage{padding:14px 10px 70px}
+    .top-welcome{flex-direction:column;align-items:flex-start;gap:10px}
+    .report-card{padding:16px 12px}
+    .rc-head{flex-direction:column}.rc-meta{text-align:left}
+    .rc-watermark{font-size:5rem}
+    .rc-stats{gap:8px;flex-wrap:nowrap}
+    .rc-stats .stat{width:auto;flex:1 1 0;min-width:0;padding:10px 8px}
+    .rc-stats .stat .num{font-size:1.3rem}.rc-stats .stat .lbl{font-size:.6rem}
+    .report-card table{font-size:.78rem}.report-card th,.report-card td{padding:7px 5px}
+    .rc-contacts{flex-direction:column}.rc-contact-card{min-width:0}
+    .select-row .field,.row-form .field{min-width:0;flex:1 1 100%}
+    .mark-grid-wrap{max-width:100%}
+    .sec-tabs input{width:100%;margin-left:0}
+    .ov-grid,.ov-grid2{grid-template-columns:minmax(0,1fr)}
+    .ov-grid>div,.ov-grid2>div,.ov-panel{min-width:0;max-width:100%}
+  }`;
+  document.head.appendChild(st);
 })();

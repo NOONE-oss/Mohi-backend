@@ -130,3 +130,80 @@ studentTransferRouter.get('/class-results', asyncHandler(async (req, res) => {
   results.forEach((r) => { r.position = r.meanPoints == null ? null : 1 + graded.filter((g) => g.meanPoints > r.meanPoints).length; });
   res.json({ class: { id: cls.id, name: cls.name }, subjects: subs.rows, results });
 }));
+
+// ---------- Duplicate IDs, bulk delete, ID checks ----------
+// Two IDs are the same if they match once "MOHI-" is ignored (MOHI-025100 and 025100 are the same ID).
+const KEY = `regexp_replace(upper(trim(school_id_number)), '^MOHI-', '')`;
+const keyOf = (v) => String(v || '').trim().toUpperCase().replace(/^MOHI-/, '');
+const isStaff = (req) => req.auth.role === 'admin' || req.auth.role === 'it_support';
+
+// Is this ID already used anywhere (any center)?
+studentTransferRouter.get('/id-taken', asyncHandler(async (req, res) => {
+  const r = await query(`SELECT center_id FROM students WHERE ${KEY} = $1 LIMIT 1`, [keyOf(req.query.id)]);
+  res.json({ taken: !!r.rows[0], mine: !!r.rows[0] && String(r.rows[0].center_id) === String(req.auth.centerId) });
+}));
+
+// Which of these IDs are already used anywhere? Returns the normalised keys that are taken.
+studentTransferRouter.post('/check-ids', asyncHandler(async (req, res) => {
+  const keys = (Array.isArray(req.body.ids) ? req.body.ids : []).map(keyOf).filter(Boolean);
+  if (!keys.length) return res.json({ taken: [] });
+  const r = await query(`SELECT DISTINCT ${KEY} AS k FROM students WHERE ${KEY} = ANY($1)`, [keys]);
+  res.json({ taken: r.rows.map((x) => x.k) });
+}));
+
+// Students whose ID is used more than once. IT support sees every center.
+// A school admin only sees the groups that include their own center, with other centers hidden.
+studentTransferRouter.get('/duplicates', asyncHandler(async (req, res) => {
+  if (!isStaff(req)) return res.status(403).json({ error: 'Not allowed' });
+  const build = (marks) => `SELECT * FROM (
+      SELECT s.id, s.full_name, s.school_id_number, s.center_id, c.name AS class_name, ce.name AS center_name,
+             regexp_replace(upper(trim(s.school_id_number)), '^MOHI-', '') AS key ${marks}
+      FROM students s LEFT JOIN classes c ON c.id = s.class_id LEFT JOIN centers ce ON ce.id = s.center_id) x
+    WHERE key IN (SELECT ${KEY} FROM students GROUP BY 1 HAVING count(*) > 1) ORDER BY key, school_id_number`;
+  let rows;
+  try { rows = (await query(build(`, (SELECT count(*) FROM marks m WHERE m.student_id = s.id)::int AS marks`))).rows; }
+  catch { rows = (await query(build(`, 0 AS marks`))).rows; }
+  const it = req.auth.role === 'it_support', groups = {};
+  rows.forEach((r) => { (groups[r.key] = groups[r.key] || []).push(r); });
+  const out = [];
+  Object.values(groups).forEach((g) => {
+    if (!it && !g.some((r) => String(r.center_id) === String(req.auth.centerId))) return;
+    g.forEach((r) => {
+      const mine = it || String(r.center_id) === String(req.auth.centerId);
+      out.push(mine ? { ...r, mine: true } : { id: r.id, key: r.key, mine: false, full_name: 'A student in another center', school_id_number: r.school_id_number, marks: 0 });
+    });
+  });
+  res.json(out);
+}));
+
+// Delete many students at once (and their marks and remarks). Admin: own center. IT support: any.
+studentTransferRouter.post('/delete-students', asyncHandler(async (req, res) => {
+  if (!isStaff(req)) return res.status(403).json({ error: 'Not allowed' });
+  let ids = (Array.isArray(req.body.ids) ? req.body.ids : []).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Choose at least one student.' });
+  if (req.auth.role === 'admin') {
+    ids = (await query(`SELECT id FROM students WHERE id = ANY($1::uuid[]) AND center_id = $2`, [ids, req.auth.centerId])).rows.map((r) => r.id);
+    if (!ids.length) return res.status(404).json({ error: 'Those students were not found in your center.' });
+  }
+  for (const sql of [
+    `DELETE FROM marks WHERE student_id = ANY($1::uuid[])`,
+    `DELETE FROM remarks WHERE student_id = ANY($1::uuid[])`,
+    `DELETE FROM student_transfers WHERE student_id = ANY($1::uuid[])`,
+  ]) { try { await query(sql, [ids]); } catch { /* table may not exist; ignore */ } }
+  try {
+    const r = await query(`DELETE FROM students WHERE id = ANY($1::uuid[])`, [ids]);
+    res.json({ deleted: r.rowCount });
+  } catch { res.status(409).json({ error: 'Could not delete: these students still have linked records.' }); }
+}));
+
+// Add "MOHI-" to IDs that are only numbers (skips any that would create a duplicate).
+studentTransferRouter.post('/normalize-ids', asyncHandler(async (req, res) => {
+  if (!isStaff(req)) return res.status(403).json({ error: 'Not allowed' });
+  const it = req.auth.role === 'it_support';
+  const r = await query(
+    `UPDATE students s SET school_id_number = 'MOHI-' || s.school_id_number
+     WHERE s.school_id_number ~ '^[0-9]+$' AND ($1 OR s.center_id = $2)
+       AND NOT EXISTS (SELECT 1 FROM students o WHERE o.id <> s.id AND upper(trim(o.school_id_number)) = 'MOHI-' || s.school_id_number)`,
+    [it, req.auth.centerId]);
+  res.json({ fixed: r.rowCount });
+}));
