@@ -435,7 +435,7 @@
 (function () {
   const css = `
   #rcBatch{display:none}
-  @page{size:A4;margin:10mm}
+  @page{size:A4 portrait;margin:10mm}
   @media print{
     body.rc-batch{background:#fff!important}
     body.rc-batch .stage,body.rc-batch .letterhead,body.rc-batch .theme-toggle,body.rc-batch .api-banner,body.rc-batch .modal-back,body.rc-batch #pfFixed,body.rc-batch .pf-menu{display:none!important}
@@ -444,6 +444,7 @@
   }
   .rcb{font-family:Arial,Helvetica,sans-serif;color:#1a2233;font-size:11.5px;line-height:1.4;background:#fff;page-break-after:always;break-after:page;padding:2px}
   .rcb:last-child{page-break-after:auto}
+  .rcb.dense{font-size:10px}.rcb.dense td{padding:2px 6px}.rcb.dense .st{margin:4px 0 6px}.rcb.dense h3{margin:6px 0 2px}
   .rcb .hd{display:flex;justify-content:space-between;gap:12px;border-bottom:2px solid #1a2233;padding-bottom:10px;margin-bottom:10px}
   .rcb .lg{display:flex;gap:10px;align-items:center}.rcb .lg img{width:46px;height:46px;object-fit:contain}
   .rcb .org{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:#3e6bb8;font-weight:700}
@@ -466,8 +467,10 @@
   const lv = s => (s ? s.slice(0, 2) : '');
 
   async function build(examId, classId, only) {
-    const [exams, classes, teachers, students, res, rem] = await Promise.all([api('/exams'), api('/classes'), api('/teachers'), api('/students'),
-      api(`/results?examId=${examId}&classId=${classId}`), api(`/remarks?examId=${examId}&classId=${classId}`).catch(() => [])]);
+    const [exams, classes, teachers, students, res, rem, mainRows, allSubs] = await Promise.all([api('/exams'), api('/classes'), api('/teachers'), api('/students'),
+      api(`/results?examId=${examId}&classId=${classId}`), api(`/remarks?examId=${examId}&classId=${classId}`).catch(() => []),
+      api('/student-transfer/main-subjects').catch(() => []), api('/subjects').catch(() => [])]);
+    const mainIds = new Set(mainRows.map(x => x.subject_id));
     const exam = exams.find(x => x.id === examId) || {}, cls = classes.find(c => c.id === classId) || {};
     const hist = await Promise.all(exams.slice(-6).map(x => api(`/results?examId=${x.id}&classId=${classId}`).then(r => ({ x, r })).catch(() => ({ x, r: [] }))));
     const graded = res.filter(r => r.subjectsGraded > 0), n = graded.length;
@@ -476,10 +479,14 @@
     const dates = [exam.opens_on ? 'Opens ' + exam.opens_on : '', exam.closes_on ? 'Closes ' + exam.closes_on : ''].filter(Boolean).join(' · ');
     const html = list.map(r => {
       const sid = r.student.id, s = students.find(x => String(x.id) === String(sid)) || students.find(x => x.full_name === r.student.full_name) || {};
-      const rows = r.subjects.filter(x => x.mark).map(({ subject, mark }) => `<tr><td>${e(subject.name)}</td><td>${mark.percent != null ? mark.percent + '%' : '—'}</td><td>${e(mark.sublevel)}</td><td>${mark.points}</td><td class="lv" style="color:${LC[lv(mark.sublevel)] || '#000'}">${lv(mark.sublevel)}</td></tr>`).join('');
+      const rowHtml = (name, mark) => mark ? `<tr><td>${e(name)}</td><td>${mark.percent != null ? mark.percent + '%' : '—'}</td><td>${e(mark.sublevel)}</td><td>${mark.points}</td><td class="lv" style="color:${LC[lv(mark.sublevel)] || '#000'}">${lv(mark.sublevel)}</td></tr>` : `<tr><td>${e(name)}</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>`;
+      const byId = {}; r.subjects.forEach(x => { if (x.subject) byId[x.subject.id] = x.mark; });
+      const shown = allSubs.filter(sb => (!sb.section || sb.section === cls.section) && (byId[sb.id] || mainIds.has(sb.id)));
+      const lines = shown.length ? shown.map(sb => rowHtml(sb.name, byId[sb.id])) : r.subjects.filter(x => x.mark).map(x => rowHtml(x.subject.name, x.mark));
+      const rows = lines.join('');
       const tr = hist.map(h => { const m = h.r.find(q => String(q.student.id) === String(sid)); return m && m.subjectsGraded > 0 ? `<tr><td>${e(h.x.name)}</td><td>${m.meanPoints.toFixed(1)}</td><td>${e(m.meanLevel || '—')}</td><td>${m.position ? '#' + m.position + ' of ' + h.r.filter(q => q.subjectsGraded > 0).length : '—'}</td></tr>` : ''; }).join('');
       const remark = remBy[sid];
-      return `<div class="rcb"><div class="hd"><div class="lg"><img src="/logo.png" alt=""><div><div class="org">${e(currentCenterName || 'Center')} · Missions of Hope International</div><h1>Report Card — ${e(exam.name)}</h1><div class="sm">${e([exam.term, exam.academic_year].filter(Boolean).join(', '))}${dates ? ' · ' + e(dates) : ''}</div></div></div>
+      return `<div class="rcb${lines.length > 11 ? ' dense' : ''}"><div class="hd"><div class="lg"><img src="/logo.png" alt=""><div><div class="org">${e(currentCenterName || 'Center')} · Missions of Hope International</div><h1>Report Card — ${e(exam.name)}</h1><div class="sm">${e([exam.term, exam.academic_year].filter(Boolean).join(', '))}${dates ? ' · ' + e(dates) : ''}</div></div></div>
         <div class="who"><b>${e(r.student.full_name)}</b><br>School ID ${e(s.school_id_number || '—')}<br>${e(cls.name || '')}${cls.section ? ' · ' + e(sectionLabel(cls.section)) : ''}</div></div>
         <div class="st"><div><b>${r.meanPoints != null ? r.meanPoints.toFixed(1) : '—'}</b><span>Mean points</span></div><div><b>${e(r.meanLevel || '—')}</b><span>Mean grade</span></div><div><b>${r.position ? '#' + r.position : '—'}</b><span>Class position (of ${n})</span></div></div>
         <table><thead><tr><th>Subject</th><th>%</th><th>Sub-level</th><th>Points</th><th>Level</th></tr></thead><tbody>${rows}</tbody></table>
@@ -960,4 +967,50 @@
     .ov-grid>div,.ov-grid2>div,.ov-panel{min-width:0;max-width:100%}
   }`;
   document.head.appendChild(st);
+})();
+
+
+/* ===== Report card: A4 portrait, only subjects with marks (plus main subjects), and a Main subject setting ===== */
+(function () {
+  const st = document.createElement('style');
+  st.textContent = `@media print{
+    .report-card{font-size:11px}.report-card h2{font-size:1.1rem}
+    .report-card .stat{padding:6px 10px}.report-card .stat .num{font-size:1.2rem}
+    .report-card th,.report-card td{padding:4px 6px}
+    .rc-head{padding-bottom:8px;margin-bottom:10px}.rc-watermark{font-size:7rem}
+    .rc-contacts{margin-top:12px}.rc-stats{margin:8px 0 12px;gap:14px}
+  }
+  .main-note{margin:0 0 12px}`;
+  document.head.appendChild(st);
+
+  // Student's on-screen / printed report card: hide subjects with no mark unless they are main subjects
+  async function trimReport() {
+    const t = document.querySelector('#studentMain .report-card table'); if (!t || !t.tBodies[0]) return;
+    let main = new Set(); try { main = new Set((await api('/student-transfer/main-subjects')).map(x => String(x.name).trim().toLowerCase())); } catch (x) {}
+    [...t.tBodies[0].rows].forEach(r => { const none = ((r.cells[2] || {}).textContent || '').trim() === '—'; if (none && !main.has(((r.cells[0] || {}).textContent || '').trim().toLowerCase())) r.remove(); });
+  }
+  if (typeof renderStudentMain === 'function') {
+    const o = window.renderStudentMain;
+    window.renderStudentMain = async function () { const r = await o.apply(this, arguments); try { await trimReport(); } catch (x) {} return r; };
+  }
+
+  // Subjects page: tick the main subjects
+  async function mainCol(main) {
+    const t = main && main.querySelector('table'); if (!t || !t.tBodies[0] || main.querySelector('#mainHint')) return;
+    let set = new Set(); try { set = new Set((await api('/student-transfer/main-subjects')).map(x => x.subject_id)); } catch (x) {}
+    const hr = t.tHead && t.tHead.rows[0]; if (hr) { const th = document.createElement('th'); th.textContent = 'Main subject'; hr.insertBefore(th, hr.lastElementChild); }
+    [...t.tBodies[0].rows].forEach(r => {
+      const id = (r.innerHTML.match(/deleteSubject\('([^']+)'\)/) || [])[1]; const c = r.insertCell(r.cells.length - 1);
+      if (id) { c.innerHTML = `<input type="checkbox" style="margin:0;width:auto;" ${set.has(id) ? 'checked' : ''}>`; c.firstChild.onchange = async ev => { try { await api('/student-transfer/main-subjects', { method: 'POST', body: { subjectId: id, isMain: ev.target.checked } }); } catch (err) { ev.target.checked = !ev.target.checked; alert(err.message); } }; }
+    });
+    t.insertAdjacentHTML('beforebegin', `<div id="mainHint" class="main-note"><p class="hint" style="margin:0 0 8px;">Main subjects always appear on the report card, even before a mark is entered. Other subjects only appear once a mark has been entered.</p>
+      <button class="btn small ghost" onclick="mainDefaults()">Make Mathematics, English and Kiswahili main subjects</button></div>`);
+  }
+  window.mainDefaults = async function () {
+    try { await api('/student-transfer/main-subjects/defaults', { method: 'POST' }); renderSubjects(document.getElementById('adminMain')); } catch (err) { alert(err.message); }
+  };
+  if (typeof renderSubjects === 'function') {
+    const o = window.renderSubjects;
+    window.renderSubjects = async function () { const r = await o.apply(this, arguments); try { await mainCol(document.getElementById('adminMain')); } catch (x) {} return r; };
+  }
 })();
