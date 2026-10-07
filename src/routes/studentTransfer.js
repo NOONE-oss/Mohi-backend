@@ -207,3 +207,45 @@ studentTransferRouter.post('/normalize-ids', asyncHandler(async (req, res) => {
     [it, req.auth.centerId]);
   res.json({ fixed: r.rowCount });
 }));
+
+// ---------- Main subjects: always shown on the report card, even when no mark has been entered ----------
+let mainReady = null;
+function ensureMain() {
+  if (!mainReady) {
+    mainReady = query(`CREATE TABLE IF NOT EXISTS main_subjects (subject_id uuid PRIMARY KEY, center_id uuid NOT NULL)`)
+      .catch((e) => { mainReady = null; throw e; });
+  }
+  return mainReady;
+}
+
+// Anyone signed in (admin, teacher, student) can read their center's main subjects.
+studentTransferRouter.get('/main-subjects', asyncHandler(async (req, res) => {
+  await ensureMain();
+  const { rows } = await query(
+    `SELECT m.subject_id, s.name FROM main_subjects m JOIN subjects s ON s.id = m.subject_id WHERE m.center_id = $1 ORDER BY s.name`,
+    [req.auth.centerId]);
+  res.json(rows);
+}));
+
+// Mark or unmark one subject as a main subject (admin and IT support).
+studentTransferRouter.post('/main-subjects', asyncHandler(async (req, res) => {
+  await ensureMain();
+  if (!isStaff(req)) return res.status(403).json({ error: 'Not allowed' });
+  const { subjectId, isMain } = req.body;
+  const ok = await query(`SELECT 1 FROM subjects WHERE id = $1 AND center_id = $2`, [subjectId, req.auth.centerId]);
+  if (!ok.rows[0]) return res.status(404).json({ error: 'Subject not found in this center.' });
+  if (isMain) await query(`INSERT INTO main_subjects (subject_id, center_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [subjectId, req.auth.centerId]);
+  else await query(`DELETE FROM main_subjects WHERE subject_id = $1 AND center_id = $2`, [subjectId, req.auth.centerId]);
+  res.json({ ok: true });
+}));
+
+// One-click: Mathematics, English and Kiswahili become main subjects.
+studentTransferRouter.post('/main-subjects/defaults', asyncHandler(async (req, res) => {
+  await ensureMain();
+  if (!isStaff(req)) return res.status(403).json({ error: 'Not allowed' });
+  const r = await query(
+    `INSERT INTO main_subjects (subject_id, center_id)
+     SELECT id, center_id FROM subjects WHERE center_id = $1 AND name ILIKE ANY (ARRAY['math%', 'english%', 'kiswahili%'])
+     ON CONFLICT DO NOTHING`, [req.auth.centerId]);
+  res.json({ added: r.rowCount });
+}));
