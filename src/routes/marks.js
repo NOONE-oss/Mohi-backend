@@ -217,9 +217,20 @@ marksRouter.post('/import-excel', requireRole('admin'), asyncHandler(async (req,
     if (!studentsByClass.has(st.class_id)) studentsByClass.set(st.class_id, []);
     studentsByClass.get(st.class_id).push(st);
   }
-  const plan = buildPlan(sheets, { classes: classes.rows, subjects: subjects.rows, studentsByClass });
+  // The admin's choices for columns we didn't recognise: { "<normalised heading>": { action: 'skip' | 'map' | 'add', ... } }
+  const mappings = new Map();
+  const sections = ['PRIMARY', 'JUNIOR', 'SENIOR'];
+  for (const [key, v] of Object.entries(req.body.mappings || {})) {
+    if (!v || typeof v !== 'object') continue;
+    if (v.action === 'skip') mappings.set(key, { action: 'skip' });
+    else if (v.action === 'map' && subjects.rows.some(s => s.id === v.subjectId)) mappings.set(key, { action: 'map', subjectId: v.subjectId });
+    else if (v.action === 'add' && typeof v.name === 'string' && v.name.trim()) {
+      mappings.set(key, { action: 'add', name: v.name.trim().slice(0, 80), section: sections.includes(v.section) ? v.section : null });
+    }
+  }
+  const plan = buildPlan(sheets, { classes: classes.rows, subjects: subjects.rows, studentsByClass, mappings });
 
-  if (dryRun) return res.json({ dryRun: true, report: plan.report, totals: plan.totals, newSubjects: plan.newSubjects.map(s => s.name) });
+  if (dryRun) return res.json({ dryRun: true, report: plan.report, totals: plan.totals, unknown: plan.unknown, newSubjects: plan.newSubjects.map(s => s.name) });
 
   const client = await pool.connect();
   try {
@@ -251,7 +262,7 @@ marksRouter.post('/import-excel', requireRole('admin'), asyncHandler(async (req,
       );
     }
     await client.query('COMMIT');
-    res.json({ dryRun: false, added: rows.length, report: plan.report, totals: plan.totals, newSubjects: plan.newSubjects.map(s => s.name) });
+    res.json({ dryRun: false, added: rows.length, report: plan.report, totals: plan.totals, unknown: plan.unknown, newSubjects: plan.newSubjects.map(s => s.name) });
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     throw e;

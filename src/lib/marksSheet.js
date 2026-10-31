@@ -52,7 +52,7 @@ function classLabelFor(sheet, headerRow) {
 }
 
 // Look at one sheet: which class, which column is which subject, which rows are learners.
-export function analyzeSheet(sheet, { classes, subjects }) {
+export function analyzeSheet(sheet, { classes, subjects, mappings }) {
   const out = { sheet: sheet.name, status: 'ok', reason: null, class: null, level: null, columns: [], learners: [], warnings: [] };
   const hdr = findHeader(sheet.rows);
   if (!hdr) {
@@ -88,14 +88,26 @@ export function analyzeSheet(sheet, { classes, subjects }) {
     const closedGroup = viaGroup ? lastGroup : null;
     lastGroup = null;
 
-    const r = resolveSubject(lookup, subjects, out.level);
-    if (!r) { cols.push({ col: c, header: label, action: 'unrecognised' }); continue; }
+    let r = resolveSubject(lookup, subjects, out.level);
+    if (!r) {
+      // a column we don't know: use the admin's choice if they made one
+      const choice = mappings?.get(n);
+      if (choice?.action === 'skip') { cols.push({ col: c, header: label, action: 'ignored', note: 'skipped — your choice' }); continue; }
+      if (choice?.action === 'map') {
+        const sub = subjects.find(x => x.id === choice.subjectId);
+        if (sub) r = { subject: sub, name: sub.name, key: null, action: 'matched' };
+      } else if (choice?.action === 'add' && choice.name) {
+        const sub = subjects.find(x => norm(x.name) === norm(choice.name));
+        r = sub ? { subject: sub, name: sub.name, key: null, action: 'matched' } : { subject: null, name: choice.name.trim(), key: null, section: choice.section || null, action: 'will-add' };
+      }
+    }
+    if (!r) { cols.push({ col: c, header: label, action: 'unrecognised', key: n }); continue; }
     const dupKey = r.subject ? r.subject.id : `new:${norm(r.name)}`;
     if (taken.has(dupKey)) { cols.push({ col: c, header: label, action: 'ignored', note: `duplicate of column ${taken.get(dupKey)}` }); continue; }
     taken.set(dupKey, label);
     if (closedGroup) groupDone.add(closedGroup);
     if (r.key === 'english' || r.key === 'kiswahili') groupDone.add(r.key);
-    cols.push({ col: c, header: label, action: r.action, subject: r.name, subjectId: r.subject?.id || null, section: r.section ?? r.subject?.section ?? null, via: viaGroup ? 'sum of its papers' : null });
+    cols.push({ col: c, header: label, action: r.action, mapped: !!(mappings?.get(n)), subject: r.name, subjectId: r.subject?.id || null, section: r.section ?? r.subject?.section ?? null, via: viaGroup ? 'sum of its papers' : null });
   }
   out.columns = cols;
   const markCols = cols.filter(c => c.subject);
@@ -123,7 +135,7 @@ export function analyzeSheet(sheet, { classes, subjects }) {
 // Full plan for a workbook: matches learners to students, lists subjects to add.
 // ctx: { classes, subjects, studentsByClass: Map(classId -> [{id, full_name}]) }
 export function buildPlan(sheets, ctx) {
-  const report = [], marks = [], newSubjects = new Map();
+  const report = [], marks = [], newSubjects = new Map(), unknown = new Map();
   let matchedTotal = 0, unmatchedTotal = 0;
   for (const sh of sheets) {
     const a = analyzeSheet(sh, ctx);
@@ -134,6 +146,11 @@ export function buildPlan(sheets, ctx) {
     };
     report.push(entry);
     if (a.status !== 'ok') continue;
+    for (const c of a.columns) {
+      if (c.action !== 'unrecognised') continue;
+      const u = unknown.get(c.key) || { key: c.key, header: c.header, sheets: [] };
+      u.sheets.push(a.sheet); unknown.set(c.key, u);
+    }
 
     const match = makeStudentMatcher(ctx.studentsByClass.get(a.class.id) || []);
     for (const l of a.learners) {
@@ -153,7 +170,7 @@ export function buildPlan(sheets, ctx) {
     matchedTotal += entry.matched; unmatchedTotal += entry.unmatched.length;
   }
   return {
-    report, marks, newSubjects: [...newSubjects.values()],
+    report, marks, newSubjects: [...newSubjects.values()], unknown: [...unknown.values()],
     totals: {
       sheets: report.length, imported: report.filter(r => r.status === 'ok').length,
       learnersMatched: matchedTotal, learnersUnmatched: unmatchedTotal, marks: marks.length,

@@ -1003,10 +1003,40 @@ async function importBulkMarksExcel(examId, dryRun){
       const r = await api('/marks/bulk', { method:'POST', body:{ examId, csv: await readFileAsText(fileInput) } });
       box.innerHTML = csvResultBox(r.added, r.skipped, 'mark'); fileInput.value = ''; return;
     }
-    const r = await api('/marks/import-excel', { method:'POST', body:{ examId, file: await readFileAsBase64(fileInput), dryRun } });
+    const r = await api('/marks/import-excel', { method:'POST', body:{ examId, file: await readFileAsBase64(fileInput), dryRun, mappings: window._markMappings || {} } });
+    if(r.unknown && r.unknown.length && !window._markSubjects){ try{ window._markSubjects = await api('/subjects'); }catch(e){ window._markSubjects = []; } }
     box.innerHTML = marksImportReport(r, examId);
-    if(!dryRun) fileInput.value = '';
+    if(!dryRun){ fileInput.value = ''; window._markMappings = {}; }
   }catch(err){ box.innerHTML = `<div class="error-msg" style="margin-top:12px;">${escapeHtml(err.message)}</div>`; }
+}
+// Columns the system doesn't know: let the admin skip them, add them as a new
+// subject (choosing its section), or count them under an existing subject.
+function unknownColumnsPanel(r, examId){
+  if(!r.unknown || !r.unknown.length) return '';
+  const subs = (window._markSubjects||[]).slice().sort((a,b)=>a.name.localeCompare(b.name));
+  const rows = r.unknown.map((u,i)=>`<tr data-key="${escapeHtml(u.key)}">
+    <td><strong>${escapeHtml(u.header)}</strong><div style="font-size:0.72rem;color:var(--text-soft);">in ${u.sheets.length} sheet${u.sheets.length===1?'':'s'}: ${escapeHtml(u.sheets.slice(0,3).join(', '))}${u.sheets.length>3?'…':''}</div></td>
+    <td><select class="ukAction" onchange="ukToggle(this)">
+        <option value="">Choose…</option><option value="new">Add as a new subject</option><option value="skip">Skip this column</option>
+        <optgroup label="Count under an existing subject">${subs.map(s=>`<option value="map:${s.id}">${escapeHtml(s.name)}</option>`).join('')}</optgroup></select></td>
+    <td class="ukNew" style="display:none;"><input type="text" class="ukName" value="${escapeHtml(u.header.replace(/\s+/g,' ').trim().toLowerCase().replace(/\b\w/g,c=>c.toUpperCase()))}" style="width:170px;">
+      <select class="ukSection"><option value="">All sections</option><option value="PRIMARY">Primary</option><option value="JUNIOR">Junior</option><option value="SENIOR">Senior</option></select></td></tr>`).join('');
+  return `<div class="panel" style="margin:14px 0;border-color:#b45309;"><h3>${r.unknown.length} column${r.unknown.length===1?'':'s'} not on your subject list</h3>
+    <p class="sub">Tell me where each one goes. Nothing is added until you import.</p>
+    <table><thead><tr><th>Column heading</th><th>What should happen?</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <button class="btn small" style="margin-top:10px;" onclick="applyUnknownChoices('${examId}')">Apply my choices &amp; re-check</button></div>`;
+}
+function ukToggle(sel){ const td = sel.closest('tr').querySelector('.ukNew'); td.style.display = sel.value==='new' ? '' : 'none'; }
+function applyUnknownChoices(examId){
+  const m = Object.assign({}, window._markMappings || {});
+  document.querySelectorAll('tr[data-key]').forEach(tr=>{
+    const v = tr.querySelector('.ukAction').value, key = tr.dataset.key;
+    if(v==='skip') m[key] = { action:'skip' };
+    else if(v==='new') m[key] = { action:'add', name: tr.querySelector('.ukName').value, section: tr.querySelector('.ukSection').value || null };
+    else if(v.startsWith('map:')) m[key] = { action:'map', subjectId: v.slice(4) };
+  });
+  window._markMappings = m;
+  importBulkMarksExcel(examId, true);
 }
 function marksImportReport(r, examId){
   const t = r.totals;
@@ -1018,8 +1048,9 @@ function marksImportReport(r, examId){
   const rows = ok.map(x=>`<tr><td>${escapeHtml(x.sheet)}</td><td>${escapeHtml(x.class.name)}</td><td>${x.matched}/${x.learners}</td><td style="font-size:0.74rem;">${x.columns.filter(c=>c.subject||c.action==='unrecognised').map(c=>c.subject?`${escapeHtml(c.header)} → ${escapeHtml(c.subject)}${c.action==='will-add'?' <em>(new)</em>':''}`:`<span style="color:#b45309">${escapeHtml(c.header)} → not recognised</span>`).join(' · ')}</td></tr>`).join('');
   const issues = ok.filter(x=>x.unmatched.length||x.warnings.length).map(x=>`<li><strong>${escapeHtml(x.sheet)}</strong>: ${[...x.unmatched.slice(0,5).map(u=>escapeHtml(u)+' not matched'),...x.warnings.slice(0,3).map(escapeHtml)].join('; ')}${x.unmatched.length>5?` … +${x.unmatched.length-5} more`:''}</li>`).join('');
   const skip = skipped.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:0.8rem;">${skipped.length} sheet${skipped.length===1?'':'s'} skipped</summary><ul style="font-size:0.78rem;color:var(--text-soft);padding-left:18px;">${skipped.map(x=>`<li>${escapeHtml(x.sheet)} — ${escapeHtml(x.reason||'')}</li>`).join('')}</ul></details>` : '';
+  const unk = r.dryRun ? unknownColumnsPanel(r, examId) : '';
   const go = r.dryRun && t.marks ? `<button class="btn small" style="margin-top:12px;" onclick="importBulkMarksExcel('${examId}', false)">Looks right — import ${t.marks} marks</button>` : '';
-  return `<div style="margin-top:12px;">${head}${sub}
+  return `<div style="margin-top:12px;">${head}${sub}${unk}
     ${rows?`<div class="mark-grid-wrap"><table><thead><tr><th>Sheet</th><th>Goes to class</th><th>Learners</th><th>Columns → subjects</th></tr></thead><tbody>${rows}</tbody></table></div>`:''}
     ${issues?`<ul style="font-size:0.78rem;color:var(--text-soft);margin:8px 0 0;padding-left:18px;">${issues}</ul>`:''}${skip}${go}</div>`;
 }
