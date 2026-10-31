@@ -268,3 +268,72 @@ export function makeStudentMatcher(students) {
     return { error: 'not found in this class' };
   };
 }
+
+// ---------- which subjects belong on a report card ----------
+// Each level only reports its own learning areas (a Grade 7 card never shows
+// Primary-only subjects). A missing mark shows as "W". Senior School shows
+// only subjects that were entered, plus the main ones, padded to at least 7.
+
+export const SENIOR_MAIN = ['english', 'kiswahili', 'maths'];
+export const SENIOR_MIN_SUBJECTS = 7;
+const RELIGION = ['re', 'cre', 'ire', 'hre'];
+const groupOf = key => (RELIGION.includes(key) ? 'religion' : key);
+const offeredAt = (key, level) => !!CATALOG.find(c => c.key === key)?.names[level];
+
+export function levelOfClassName(name) {
+  const p = parseClassLabel(name);
+  return p ? levelOfGrade(p.gradeKey) : null;
+}
+
+// Subjects (rows from the subjects table) that can apply to this level.
+export function eligibleSubjects(subjects, level, section) {
+  return subjects.filter(s => {
+    const k = aliasKey(s.name);
+    if (level && k) return offeredAt(k, level);
+    return !s.section || s.section === section;   // custom subjects / unknown level: section rule
+  });
+}
+
+function pickSubjects(subjects, level, section, markedIds) {
+  const groups = new Map();
+  for (const s of eligibleSubjects(subjects, level, section)) {
+    const k = aliasKey(s.name);
+    const g = k ? groupOf(k) : `custom:${s.id}`;
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(s);
+  }
+  const out = [];
+  for (const [g, list] of groups) {
+    const custom = g.startsWith('custom:');
+    const marked = list.filter(s => markedIds.has(s.id));
+    if (marked.length) { marked.forEach(s => out.push({ subject: s, key: aliasKey(s.name), marked: true })); continue; }
+    if (custom) continue;                         // custom subjects only appear when graded
+    const priority = ['cre', 're', 'ire', 'hre'];
+    const official = list.find(s => level && norm(s.name) === norm(CATALOG.find(c => c.key === aliasKey(s.name))?.names[level]));
+    const rep = official || [...list].sort((a, b) => priority.indexOf(aliasKey(a.name)) - priority.indexOf(aliasKey(b.name)))[0];
+    out.push({ subject: rep, key: aliasKey(rep.name), marked: false });
+  }
+  const order = k => { const i = CATALOG.findIndex(c => c.key === k); return i < 0 ? 999 : i; };
+  return out.sort((a, b) => order(a.key) - order(b.key) || a.subject.name.localeCompare(b.subject.name));
+}
+
+// One learner's report-card rows. marksById: Map(subject_id -> mark).
+export function reportRows({ subjects, level, section, marksById }) {
+  const picked = pickSubjects(subjects, level, section, new Set(marksById.keys()));
+  const senior = level === 'SS';
+  const rows = picked
+    .filter(p => !senior || p.marked || SENIOR_MAIN.includes(p.key))
+    .map(p => { const mark = marksById.get(p.subject.id) || null; return { subject: p.subject, mark, missing: !mark }; });
+  if (senior) {
+    while (rows.length < SENIOR_MIN_SUBJECTS) rows.push({ subject: { id: null, name: '—' }, mark: null, missing: true, placeholder: true });
+  }
+  return rows;
+}
+
+// Columns for a whole class's results grid.
+export function classColumns({ subjects, level, section, markedIds }) {
+  const senior = level === 'SS';
+  return pickSubjects(subjects, level, section, markedIds)
+    .filter(p => !senior || p.marked || SENIOR_MAIN.includes(p.key))
+    .map(p => p.subject);
+}

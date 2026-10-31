@@ -1205,9 +1205,10 @@ async function renderStudentMain(examId){
   catch(err){ main.innerHTML = `<div class="placeholder-box"><div class="tagline">No results published yet</div>Check back once your center's admin publishes a term's results.</div>`; return; }
   const trend = await api(`/report-card/${currentStudent.id}/trend`);
   const examOpts = exams.filter(e=>e.is_published).map(e=>`<option value="${e.id}" ${e.id===exam.id?'selected':''}>${escapeHtml(e.name)}</option>`).join('');
+  // No mark entered -> "W" in every grading column (Senior School pads to at least 7 rows).
   const subjectRows = report.subjects.map(({subject, mark})=>`<tr><td>${escapeHtml(subject.name)}</td>
-    <td class="pts">${mark&&mark.percent!=null?mark.percent+'%':'—'}</td><td class="pts">${mark?mark.sublevel:'—'}</td><td class="pts">${mark?mark.points:'—'}</td>
-    <td>${mark?`<span class="level-chip ${levelOf(mark.sublevel)}">${levelOf(mark.sublevel)}</span>`:'—'}</td></tr>`).join('');
+    <td class="pts">${mark?(mark.percent!=null?mark.percent+'%':'—'):'W'}</td><td class="pts">${mark?mark.sublevel:'W'}</td><td class="pts">${mark?mark.points:'W'}</td>
+    <td>${mark?`<span class="level-chip ${levelOf(mark.sublevel)}">${levelOf(mark.sublevel)}</span>`:'W'}</td></tr>`).join('');
   const trendRows = trend.map(t=>`<tr><td>${escapeHtml(t.exam.name)}</td><td class="pts">${t.meanPoints.toFixed(1)}</td>
     <td><span class="level-chip ${t.meanLevel}">${t.meanLevel}</span></td><td class="rank">${t.position?'#'+t.position+' of '+t.outOf:'—'}</td></tr>`).join('');
   const termDates = [exam.opens_on?`Opens ${exam.opens_on}`:'', exam.closes_on?`Closes ${exam.closes_on}`:''].filter(Boolean).join(' · ');

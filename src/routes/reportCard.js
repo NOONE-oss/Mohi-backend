@@ -3,6 +3,7 @@ import { query } from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { pointsToLevel } from '../lib/grading.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { levelOfClassName, eligibleSubjects, reportRows } from '../lib/curriculum.js';
 
 export const reportCardRouter = Router();
 reportCardRouter.use(requireAuth);
@@ -17,23 +18,26 @@ async function computeStudentExam(centerId, studentId, examId) {
   if (!student.rows[0]) return null;
   const s = student.rows[0];
 
-  const subjects = await query(
-    `SELECT id, name FROM subjects WHERE center_id = $1 AND (section IS NULL OR section = $2) ORDER BY name`,
-    [centerId, s.section]
-  );
-  const classmateTotals = await query(
-    `SELECT student_id, SUM(points) AS total FROM marks
-     WHERE exam_id = $1 AND student_id IN (SELECT id FROM students WHERE class_id = $2)
-     GROUP BY student_id`,
+  const subjects = await query(`SELECT id, name, section FROM subjects WHERE center_id = $1 ORDER BY name`, [centerId]);
+  // Only this level's learning areas count (a Grade 7 card has no Primary subjects).
+  const level = levelOfClassName(s.class_name || '');
+  const eligibleIds = new Set(eligibleSubjects(subjects.rows, level, s.section).map((x) => x.id));
+  const classmateMarks = await query(
+    `SELECT student_id, subject_id, points FROM marks
+     WHERE exam_id = $1 AND student_id IN (SELECT id FROM students WHERE class_id = $2)`,
     [examId, s.class_id]
   );
+  const totalsByStudent = new Map();
+  for (const m of classmateMarks.rows) {
+    if (eligibleIds.has(m.subject_id)) totalsByStudent.set(m.student_id, (totalsByStudent.get(m.student_id) || 0) + m.points);
+  }
   const marks = await query(`SELECT subject_id, sublevel, points, percent FROM marks WHERE exam_id = $1 AND student_id = $2`, [examId, studentId]);
-  const marksBySubject = Object.fromEntries(marks.rows.map((m) => [m.subject_id, m]));
+  const marksById = new Map(marks.rows.map((m) => [m.subject_id, m]));
 
-  const graded = marks.rows;
+  const graded = marks.rows.filter((m) => eligibleIds.has(m.subject_id));
   const meanPoints = graded.length ? graded.reduce((a, m) => a + m.points, 0) / graded.length : null;
 
-  const ranked = classmateTotals.rows.map((r) => Number(r.total)).sort((a, b) => b - a);
+  const ranked = [...totalsByStudent.values()].sort((a, b) => b - a);
   const myTotal = graded.reduce((a, m) => a + m.points, 0);
   const position = graded.length ? ranked.indexOf(myTotal) + 1 : null;
 
@@ -44,7 +48,9 @@ async function computeStudentExam(centerId, studentId, examId) {
 
   return {
     student: { id: s.id, name: s.full_name, className: s.class_name, section: s.section, parentName: s.parent_name, parentPhone: s.parent_phone, parentEmail: s.parent_email },
-    subjects: subjects.rows.map((sub) => ({ subject: sub, mark: marksBySubject[sub.id] || null })),
+    // missing: true means no mark -> shown as "W" on the card
+    subjects: reportRows({ subjects: subjects.rows, level, section: s.section, marksById }),
+    level,
     meanPoints, meanLevel: meanPoints !== null ? pointsToLevel(meanPoints) : null,
     position, outOf: ranked.length,
     subjectsGraded: graded.length,

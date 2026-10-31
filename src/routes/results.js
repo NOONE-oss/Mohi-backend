@@ -3,6 +3,7 @@ import { query } from '../lib/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { pointsToLevel } from '../lib/grading.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { levelOfClassName, eligibleSubjects, classColumns } from '../lib/curriculum.js';
 
 export const resultsRouter = Router();
 resultsRouter.use(requireAuth);
@@ -14,13 +15,12 @@ resultsRouter.get('/', asyncHandler(async (req, res) => {
   const { examId, classId } = req.query;
   if (!examId || !classId) return res.status(400).json({ error: 'examId and classId are required' });
 
-  const cls = await query(`SELECT id, section FROM classes WHERE id = $1 AND center_id = $2`, [classId, req.auth.centerId]);
+  const cls = await query(`SELECT id, name, section FROM classes WHERE id = $1 AND center_id = $2`, [classId, req.auth.centerId]);
   if (!cls.rows[0]) return res.status(404).json({ error: 'Class not found at this center' });
 
-  const subjects = await query(
-    `SELECT id, name FROM subjects WHERE center_id = $1 AND (section IS NULL OR section = $2) ORDER BY name`,
-    [req.auth.centerId, cls.rows[0].section]
-  );
+  const allSubjects = await query(`SELECT id, name, section FROM subjects WHERE center_id = $1 ORDER BY name`, [req.auth.centerId]);
+  const level = levelOfClassName(cls.rows[0].name);
+  const eligibleIds = new Set(eligibleSubjects(allSubjects.rows, level, cls.rows[0].section).map((x) => x.id));
 
   const students = await query(
     `SELECT id, full_name FROM students WHERE class_id = $1 AND center_id = $2 ORDER BY full_name`,
@@ -37,9 +37,13 @@ resultsRouter.get('/', asyncHandler(async (req, res) => {
     (marksByStudent[m.student_id] ??= {})[m.subject_id] = m;
   }
 
+  const markedIds = new Set(marks.rows.filter((m) => eligibleIds.has(m.subject_id)).map((m) => m.subject_id));
+  const columns = classColumns({ subjects: allSubjects.rows, level, section: cls.rows[0].section, markedIds });
+  const subjects = { rows: columns };
+
   const rows = students.rows.map((s) => {
     const subjectMarks = marksByStudent[s.id] || {};
-    const graded = Object.values(subjectMarks);
+    const graded = Object.entries(subjectMarks).filter(([id]) => eligibleIds.has(id)).map(([, m]) => m);
     const total = graded.reduce((sum, m) => sum + m.points, 0);
     const meanPoints = graded.length ? total / graded.length : null;
     return {
