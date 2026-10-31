@@ -363,6 +363,32 @@ function readFileAsText(inputEl){
     r.readAsText(inputEl.files[0]);
   });
 }
+function readFileAsBase64(inputEl){
+  return new Promise((resolve, reject)=>{
+    if(!inputEl.files.length) return reject(new Error('Choose an Excel file first.'));
+    const f = inputEl.files[0];
+    if(!/\.(xlsx|csv)$/i.test(f.name)) return reject(new Error('Please choose an Excel .xlsx file.'));
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = () => reject(new Error('Could not read that file.'));
+    r.readAsDataURL(f);
+  });
+}
+async function downloadServerFile(path, filename){
+  try{
+    const res = await fetch(`${API_BASE}${path}`, { headers:{ Authorization:`Bearer ${authToken}` } });
+    if(!res.ok){ let m='Download failed'; try{ m=(await res.json()).error||m; }catch{} throw new Error(m); }
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a'); a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  }catch(err){ alert(err.message); }
+}
+// File to send: .xlsx goes as base64 `file`; a .csv still works as before.
+async function fileBody(inputEl){
+  const f = inputEl.files[0];
+  if(f && /\.csv$/i.test(f.name)) return { csv: await readFileAsText(inputEl) };
+  return { file: await readFileAsBase64(inputEl) };
+}
 function togglePw(id, btn){
   const el = document.getElementById(id); if(!el) return;
   const show = el.type === 'password';
@@ -662,7 +688,31 @@ async function renderSubjects(main){
       <div class="field"><label for="newSubjectSection">Section</label><select id="newSubjectSection">
         <option value="">All sections</option><option value="PRIMARY">Primary School</option><option value="JUNIOR">Junior School</option><option value="SENIOR">Senior School</option></select></div>
       <button class="btn" onclick="addSubject()">Add subject</button></div>
-      ${subjects.length ? `<table><thead><tr><th></th><th>Name</th><th>Section</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No subjects yet.</div>'}</div>`;
+      ${subjects.length ? `<table><thead><tr><th></th><th>Name</th><th>Section</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No subjects yet.</div>'}</div>
+    <div class="panel" id="catalogPanel"><h3>Add from the official CBC subject list</h3><p class="sub">Loading…</p></div>`;
+  renderCatalogPanel();
+}
+async function renderCatalogPanel(){
+  const box = document.getElementById('catalogPanel'); if(!box) return;
+  try{
+    const levels = await api('/subjects/catalog');
+    box.innerHTML = `<h3>Add from the official CBC subject list</h3>
+      <p class="sub">Learning areas for each level under the Kenyan CBC. Tick the ones you teach and add them in one go — Excel uploads recognise short forms (MATHS, SST, SCIE&amp;TECH…) for these automatically. Senior School is pathway-based: confirm against the current KICD designs.</p>
+      ${levels.map(l=>`<div style="margin:14px 0 4px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><strong>${escapeHtml(l.label)}</strong>
+        <a href="#" style="font-size:0.78rem;" onclick="addCatalogLevel('${l.key}'); return false;">Add all for this level</a></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px 18px;">${l.subjects.map(s=>`<label style="font-size:0.85rem;${s.added?'opacity:.5;':''}"><input type="checkbox" class="catChk" data-level="${l.key}" value="${escapeHtml(s.name)}" ${s.added?'checked disabled':''}> ${escapeHtml(s.name)}${s.added?' ✓':''}</label>`).join('')}</div>`).join('')}
+      <div style="margin-top:16px;"><button class="btn small" onclick="addCatalogChecked()">Add ticked subjects</button></div>`;
+    window._catalog = levels;
+  }catch(err){ box.innerHTML = `<h3>Add from the official CBC subject list</h3><div class="error-msg">${escapeHtml(err.message)}</div>`; }
+}
+async function addCatalogNames(names){
+  if(!names.length) return alert('Nothing new to add.');
+  try{ await api('/subjects/from-catalog', { method:'POST', body:{ names } }); renderSubjects(document.getElementById('adminMain')); }catch(err){ alert(err.message); }
+}
+function addCatalogChecked(){ addCatalogNames([...document.querySelectorAll('.catChk:checked:not(:disabled)')].map(c=>c.value)); }
+function addCatalogLevel(key){
+  const l = (window._catalog||[]).find(x=>x.key===key);
+  addCatalogNames(l ? l.subjects.filter(s=>!s.added).map(s=>s.name) : []);
 }
 async function addSubject(){
   const name = document.getElementById('newSubjectName').value.trim();
@@ -730,10 +780,10 @@ async function renderTeachers(main, summaryHtml){
       </div>
       ${teachers.length ? `<div class="mark-grid-wrap"><table><thead><tr><th></th><th>Name</th><th>Login email</th><th>Section</th><th>Class — Subject</th><th>Phone</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty">No teachers yet.</div>'}
     </div>
-    <div class="panel"><h3>Bulk upload teachers (CSV)</h3>
-      <p class="sub">Columns: <strong>Full Name, Section, Class, Subject, Phone</strong>. Same name on several rows adds all of those pairs. Teachers added this way need an email + password set in Edit before they can sign in.
-      <a href="#" onclick="downloadCSV('mohi-teachers-template.csv', [['Full Name','Section','Class','Subject','Phone'],['Mrs. Grace Wambui','JUNIOR','${classes[0]?escapeHtml(classes[0].name):'Grade 7 Blue'}','${subjects[0]?escapeHtml(subjects[0].name):'Mathematics'}','0712 345 678']]); return false;">Download CSV template</a></p>
-      <div class="row-form"><div class="field"><label for="teacherCsvFile">CSV file</label><input type="file" id="teacherCsvFile" accept=".csv,text/csv"></div>
+    <div class="panel"><h3>Bulk upload teachers (Excel)</h3>
+      <p class="sub">Columns: <strong>Full Name, Section, Class, Subject, Phone</strong>. Same name on several rows adds all of those pairs. Class can be written like <em>GRD 4 RED</em> and subject in short form (<em>MATHS, SST, C/A</em>). Teachers added this way need an email + password set in Edit before they can sign in.
+      <a href="#" onclick="downloadServerFile('/teachers/template','mohi-teachers-template.xlsx'); return false;">Download Excel template</a></p>
+      <div class="row-form"><div class="field"><label for="teacherCsvFile">Excel file</label><input type="file" id="teacherCsvFile" accept=".xlsx,.csv"></div>
         <button class="btn small" onclick="importTeachersCsv()">Upload &amp; add teachers</button></div>
       ${summaryHtml||''}</div>`;
   pairRender('new');
@@ -741,8 +791,7 @@ async function renderTeachers(main, summaryHtml){
 async function importTeachersCsv(){
   const fileInput = document.getElementById('teacherCsvFile');
   try{
-    const csv = await readFileAsText(fileInput);
-    const result = await api('/teachers/bulk', { method:'POST', body:{ csv } });
+    const result = await api('/teachers/bulk', { method:'POST', body: await fileBody(fileInput) });
     fileInput.value = '';
     renderTeachers(document.getElementById('adminMain'), csvResultBox(result.added, result.skipped, 'teacher'));
   }catch(err){ renderTeachers(document.getElementById('adminMain'), `<div class="error-msg" style="margin-top:12px;">${escapeHtml(err.message)}</div>`); }
@@ -812,17 +861,16 @@ async function renderStudents(main, summaryHtml){
       <div class="field"><label for="newStudentClass">Class</label><select id="newStudentClass">${classOpts||'<option value="">No classes yet</option>'}</select></div>
       <button class="btn" onclick="addStudent()">Add student</button></div>
       ${students.length ? `<div class="mark-grid-wrap"><table><thead><tr><th></th><th>Name</th><th>School ID</th><th>Class</th><th>Login status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty">No students yet.</div>'}</div>
-    <div class="panel"><h3>Bulk upload students (CSV)</h3>
-      <p class="sub">Columns: <strong>Full Name, School ID, Class</strong>. Class must match an existing class name exactly.
-      <a href="#" onclick="downloadCSV('mohi-students-template.csv', [['Full Name','School ID','Class'],['Peter Kamau','MOHI-0210','${classes[0]?escapeHtml(classes[0].name):'Grade 7 Blue'}']]); return false;">Download CSV template</a></p>
-      <div class="row-form"><div class="field"><label for="studentCsvFile">CSV file</label><input type="file" id="studentCsvFile" accept=".csv,text/csv"></div>
+    <div class="panel"><h3>Bulk upload students (Excel)</h3>
+      <p class="sub">Columns: <strong>Full Name, School ID, Class</strong>. Class can be written like <em>Grade 4 Red</em> or <em>GRD 4 RED</em> — it is matched to your classes automatically.
+      <a href="#" onclick="downloadServerFile('/students/template','mohi-students-template.xlsx'); return false;">Download Excel template</a></p>
+      <div class="row-form"><div class="field"><label for="studentCsvFile">Excel file</label><input type="file" id="studentCsvFile" accept=".xlsx,.csv"></div>
         <button class="btn small" onclick="importStudentsCsv()">Upload &amp; add students</button></div>${summaryHtml||''}</div>`;
 }
 async function importStudentsCsv(){
   const fileInput = document.getElementById('studentCsvFile');
   try{
-    const csv = await readFileAsText(fileInput);
-    const result = await api('/students/bulk', { method:'POST', body:{ csv } });
+    const result = await api('/students/bulk', { method:'POST', body: await fileBody(fileInput) });
     fileInput.value = '';
     renderStudents(document.getElementById('adminMain'), csvResultBox(result.added, result.skipped, 'student'));
   }catch(err){ renderStudents(document.getElementById('adminMain'), `<div class="error-msg" style="margin-top:12px;">${escapeHtml(err.message)}</div>`); }
@@ -937,22 +985,43 @@ async function renderResults(main, examId, classId){
     <div class="select-row"><div class="field"><label for="resultsExamSel">Exam</label><select id="resultsExamSel">${examOpts}</select></div>
       <div class="field"><label for="resultsClassSel">Class</label><select id="resultsClassSel">${classOpts||'<option>No classes yet</option>'}</select></div></div>
     ${tableHtml}
-    <div class="panel"><h3>Bulk upload — whole school, one exam</h3>
-      <p class="sub">Columns: <strong>School ID, Subject, Score</strong> (a CBC sub-level or 0–100 percentage). Applies to <strong>${escapeHtml(exam.name)}</strong>.
-      <a href="#" onclick="downloadCSV('mohi-whole-school-marks-template.csv', [['School ID','Subject','Score']]); return false;">Download CSV template</a></p>
-      <div class="row-form"><div class="field"><label for="bulkMarksCsvFile">CSV file</label><input type="file" id="bulkMarksCsvFile" accept=".csv,text/csv"></div>
-        <button class="btn small" onclick="importBulkMarksCsv('${exam.id}')">Upload &amp; apply marks</button></div><div id="bulkMarksResult"></div></div>`;
+    <div class="panel"><h3>Upload marks from Excel — whole school, one exam</h3>
+      <p class="sub">Upload your usual mark workbook: <strong>one sheet per class</strong> (e.g. <em>GRD 4 RED</em>, <em>GRD 9 LOVE</em>) with a <strong>NAME</strong> column and a column per subject. The class is found from the sheet name, subjects from the column headings (short forms like MATHS, SST, C/A are understood) and learners by name. Marks apply to <strong>${escapeHtml(exam.name)}</strong>.
+      <a href="#" onclick="downloadServerFile('/marks/template','mohi-marks-sheet.xlsx'); return false;">Download a blank marks workbook</a> (every class, learners and the right subjects already filled in).</p>
+      <div class="row-form"><div class="field"><label for="bulkMarksCsvFile">Excel file</label><input type="file" id="bulkMarksCsvFile" accept=".xlsx,.csv"></div>
+        <button class="btn small" onclick="importBulkMarksExcel('${exam.id}', true)">Check file</button></div><div id="bulkMarksResult"></div></div>`;
   document.getElementById('resultsExamSel').addEventListener('change', e=>renderResults(main, e.target.value, document.getElementById('resultsClassSel').value));
   const cs = document.getElementById('resultsClassSel');
   if(cs) cs.addEventListener('change', e=>renderResults(main, document.getElementById('resultsExamSel').value, e.target.value));
 }
-async function importBulkMarksCsv(examId){
+async function importBulkMarksExcel(examId, dryRun){
   const fileInput = document.getElementById('bulkMarksCsvFile'), box = document.getElementById('bulkMarksResult');
   try{
-    const csv = await readFileAsText(fileInput);
-    const r = await api('/marks/bulk', { method:'POST', body:{ examId, csv } });
-    box.innerHTML = csvResultBox(r.added, r.skipped, 'mark'); fileInput.value = '';
+    box.innerHTML = `<p class="hint" style="margin-top:12px;">${dryRun?'Checking':'Importing'}… this can take a moment for a whole school.</p>`;
+    const f = fileInput.files[0];
+    if(f && /\.csv$/i.test(f.name)){
+      const r = await api('/marks/bulk', { method:'POST', body:{ examId, csv: await readFileAsText(fileInput) } });
+      box.innerHTML = csvResultBox(r.added, r.skipped, 'mark'); fileInput.value = ''; return;
+    }
+    const r = await api('/marks/import-excel', { method:'POST', body:{ examId, file: await readFileAsBase64(fileInput), dryRun } });
+    box.innerHTML = marksImportReport(r, examId);
+    if(!dryRun) fileInput.value = '';
   }catch(err){ box.innerHTML = `<div class="error-msg" style="margin-top:12px;">${escapeHtml(err.message)}</div>`; }
+}
+function marksImportReport(r, examId){
+  const t = r.totals;
+  const ok = r.report.filter(x=>x.status==='ok'), skipped = r.report.filter(x=>x.status!=='ok');
+  const head = r.dryRun
+    ? `<div class="status-pill draft">Preview — nothing saved yet</div>`
+    : `<div class="status-pill published">${r.added} marks saved</div>`;
+  const sub = `<p class="sub" style="margin:10px 0;">${ok.length} class sheet${ok.length===1?'':'s'} read · ${t.learnersMatched} learners matched${t.learnersUnmatched?` · <strong>${t.learnersUnmatched} not found</strong>`:''} · ${t.marks} marks${r.newSubjects.length?` · new subjects ${r.dryRun?'to be added':'added'}: ${r.newSubjects.map(escapeHtml).join(', ')}`:''}</p>`;
+  const rows = ok.map(x=>`<tr><td>${escapeHtml(x.sheet)}</td><td>${escapeHtml(x.class.name)}</td><td>${x.matched}/${x.learners}</td><td style="font-size:0.74rem;">${x.columns.filter(c=>c.subject||c.action==='unrecognised').map(c=>c.subject?`${escapeHtml(c.header)} → ${escapeHtml(c.subject)}${c.action==='will-add'?' <em>(new)</em>':''}`:`<span style="color:#b45309">${escapeHtml(c.header)} → not recognised</span>`).join(' · ')}</td></tr>`).join('');
+  const issues = ok.filter(x=>x.unmatched.length||x.warnings.length).map(x=>`<li><strong>${escapeHtml(x.sheet)}</strong>: ${[...x.unmatched.slice(0,5).map(u=>escapeHtml(u)+' not matched'),...x.warnings.slice(0,3).map(escapeHtml)].join('; ')}${x.unmatched.length>5?` … +${x.unmatched.length-5} more`:''}</li>`).join('');
+  const skip = skipped.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:0.8rem;">${skipped.length} sheet${skipped.length===1?'':'s'} skipped</summary><ul style="font-size:0.78rem;color:var(--text-soft);padding-left:18px;">${skipped.map(x=>`<li>${escapeHtml(x.sheet)} — ${escapeHtml(x.reason||'')}</li>`).join('')}</ul></details>` : '';
+  const go = r.dryRun && t.marks ? `<button class="btn small" style="margin-top:12px;" onclick="importBulkMarksExcel('${examId}', false)">Looks right — import ${t.marks} marks</button>` : '';
+  return `<div style="margin-top:12px;">${head}${sub}
+    ${rows?`<div class="mark-grid-wrap"><table><thead><tr><th>Sheet</th><th>Goes to class</th><th>Learners</th><th>Columns → subjects</th></tr></thead><tbody>${rows}</tbody></table></div>`:''}
+    ${issues?`<ul style="font-size:0.78rem;color:var(--text-soft);margin:8px 0 0;padding-left:18px;">${issues}</ul>`:''}${skip}${go}</div>`;
 }
 
 /* ---------- NOTIFICATIONS ---------- */

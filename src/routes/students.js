@@ -3,6 +3,8 @@ import { query } from '../lib/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { hashPassword } from '../lib/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { firstSheetToCsv, simpleTemplate } from '../lib/excel.js';
+import { pickClass, parseClassLabel } from '../lib/curriculum.js';
 
 export const studentsRouter = Router();
 studentsRouter.use(requireAuth);
@@ -59,13 +61,25 @@ studentsRouter.post('/', requireRole('admin'), asyncHandler(async (req, res) => 
   res.status(201).json(rows[0]);
 }));
 
-// Bulk add via CSV — columns: Full Name, School ID, Class (class matched by
+// Excel template for bulk adding students (GET before any :id routes).
+studentsRouter.get('/template', requireRole('admin'), asyncHandler(async (req, res) => {
+  const { rows } = await query(`SELECT name FROM classes WHERE center_id = $1 ORDER BY name LIMIT 1`, [req.auth.centerId]);
+  const buf = await simpleTemplate('Students', ['Full Name', 'School ID', 'Class'], [['Peter Kamau Mwangi', 'MOHI-0210', rows[0]?.name || 'Grade 7 Blue']], [34, 18, 22]);
+  res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="mohi-students-template.xlsx"' });
+  res.send(Buffer.from(buf));
+}));
+
+// Bulk add via Excel (or CSV text) — columns: Full Name, School ID, Class (class matched by
 // name at this center; unmatched class name still creates the student, just
 // unassigned). Client sends the raw CSV text; parsing happens here so the
 // validation rules live in one place.
 studentsRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res) => {
-  const { csv } = req.body;
-  if (!csv || !csv.trim()) return res.status(400).json({ error: 'csv text is required' });
+  let { csv } = req.body;
+  if (req.body.file) {
+    try { csv = await firstSheetToCsv(Buffer.from(req.body.file, 'base64')); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+  }
+  if (!csv || !csv.trim()) return res.status(400).json({ error: 'An Excel file (or csv text) is required' });
 
   const classes = await query(`SELECT id, name FROM classes WHERE center_id = $1`, [req.auth.centerId]);
   const classByName = new Map(classes.rows.map(c => [c.name.toLowerCase(), c.id]));
@@ -82,7 +96,10 @@ studentsRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res)
     if (!name || !schoolId) { skipped.push(`Row ${i + 1}: missing name or School ID`); continue; }
     const dupe = await query(`SELECT id FROM students WHERE school_id_number = $1`, [schoolId]);
     if (dupe.rows[0]) { skipped.push(`Row ${i + 1}: School ID "${schoolId}" already in use`); continue; }
-    const classId = className ? classByName.get(className.trim().toLowerCase()) : null;
+    // exact name first, then "GRD 4 RED" / "4 red" / "Grade 4R" style short forms
+    const classId = className
+      ? (classByName.get(className.trim().toLowerCase()) || pickClass(parseClassLabel(className), classes.rows).cls?.id || null)
+      : null;
     if (className && !classId) skipped.push(`Row ${i + 1}: class "${className}" not found — added with no class`);
     await query(
       `INSERT INTO students (school_id_number, center_id, full_name, class_id, password_hash) VALUES ($1,$2,$3,$4,$5)`,

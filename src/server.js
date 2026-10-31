@@ -39,7 +39,8 @@ process.on('uncaughtException', (err) => {
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Excel uploads arrive as base64 inside the JSON body, so allow larger bodies.
+app.use(express.json({ limit: '15mb' }));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

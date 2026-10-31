@@ -1,11 +1,11 @@
 {
   "name": "mohi-results-backend",
   "version": "0.1.0",
-  "description": "MOHI Exam Results & Analytics System — backend API (multi-center)",
+  "description": "MOHI Exam Results & Analytics System \u2014 backend API (multi-center)",
   "type": "module",
   "main": "src/server.js",
   "scripts": {
-    "dev":"node --watch-path=src src/server.js",
+    "dev": "node --watch-path=src src/server.js",
     "start": "node src/server.js",
     "migrate": "bash -c 'set -a; source .env; set +a; psql \"$DATABASE_URL\" -f db/schema.sql'",
     "seed": "node src/scripts/seed.js",
@@ -16,6 +16,7 @@
     "cors": "^2.8.5",
     "csv-parse": "^5.5.6",
     "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.23.0",

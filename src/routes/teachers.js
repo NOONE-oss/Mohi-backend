@@ -3,6 +3,8 @@ import { query } from '../lib/db.js';
 import { hashPassword } from '../lib/auth.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { firstSheetToCsv, simpleTemplate } from '../lib/excel.js';
+import { pickClass, parseClassLabel, resolveSubject } from '../lib/curriculum.js';
 
 export const teachersRouter = Router();
 teachersRouter.use(requireAuth);
@@ -113,11 +115,23 @@ teachersRouter.post('/:id/reset-password', requireRole('admin'), asyncHandler(as
   res.json({ ok: true });
 }));
 
-// Bulk add via CSV — columns: Full Name, Section, Class, Subject, Phone.
+// Excel template for bulk adding teachers (GET before any :id routes).
+teachersRouter.get('/template', requireRole('admin'), asyncHandler(async (req, res) => {
+  const buf = await simpleTemplate('Teachers', ['Full Name', 'Section', 'Class', 'Subject', 'Phone'],
+    [['Mrs. Grace Wambui', 'JUNIOR', 'Grade 8 Love', 'Mathematics', '0712 345 678']], [30, 12, 22, 24, 18]);
+  res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="mohi-teachers-template.xlsx"' });
+  res.send(Buffer.from(buf));
+}));
+
+// Bulk add via Excel (or CSV text) — columns: Full Name, Section, Class, Subject, Phone.
 // Teachers added this way have no login until you give them an email + password in Edit.
 teachersRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res) => {
-  const { csv } = req.body;
-  if (!csv || !csv.trim()) return res.status(400).json({ error: 'csv text is required' });
+  let { csv } = req.body;
+  if (req.body.file) {
+    try { csv = await firstSheetToCsv(Buffer.from(req.body.file, 'base64')); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+  }
+  if (!csv || !csv.trim()) return res.status(400).json({ error: 'An Excel file (or csv text) is required' });
 
   const [classes, subjects] = await Promise.all([
     query(`SELECT id, name FROM classes WHERE center_id = $1`, [req.auth.centerId]),
@@ -154,10 +168,15 @@ teachersRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res)
       }
       teacherIdByName.set(name.toLowerCase(), teacherId);
     }
-    const classId = className ? classByName.get(className.trim().toLowerCase()) : null;
+    const classId = className
+      ? (classByName.get(className.trim().toLowerCase()) || pickClass(parseClassLabel(className), classes.rows).cls?.id || null)
+      : null;
     if (className && !classId) skipped.push(`Row ${i + 1}: class "${className}" not found`);
     if (classId) await query(`INSERT INTO class_teachers (class_id, teacher_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [classId, teacherId]);
-    const subjectId = subjectName ? subjectByName.get(subjectName.trim().toLowerCase()) : null;
+    // exact name first, then short forms teachers use (MATHS, SST, C/A, SCIE&TECH ...)
+    const subjectId = subjectName
+      ? (subjectByName.get(subjectName.trim().toLowerCase()) || resolveSubject(subjectName, subjects.rows, null)?.subject?.id || null)
+      : null;
     if (subjectName && !subjectId) skipped.push(`Row ${i + 1}: subject "${subjectName}" not found`);
     if (subjectId) await query(`INSERT INTO teacher_subjects (teacher_id, subject_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [teacherId, subjectId]);
     if (classId && subjectId) await query(`INSERT INTO teacher_assignments (teacher_id, class_id, subject_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [teacherId, classId, subjectId]);

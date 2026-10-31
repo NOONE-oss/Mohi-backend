@@ -1,8 +1,11 @@
 import { Router } from 'express';
-import { query } from '../lib/db.js';
+import { query, pool } from '../lib/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { SUBLEVEL_POINTS, isValidSublevel, percentToSublevel } from '../lib/grading.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { readSheets, marksWorkbook } from '../lib/excel.js';
+import { buildPlan, subjectHeadersForLevel } from '../lib/marksSheet.js';
+import { parseClassLabel, levelOfGrade, resolveSubject, norm } from '../lib/curriculum.js';
 
 export const marksRouter = Router();
 marksRouter.use(requireAuth);
@@ -162,7 +165,8 @@ marksRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res) =>
     const [schoolId, subjectName, scoreRaw] = lines[i];
     const studentId = schoolId ? studentByCode.get(schoolId.trim().toLowerCase()) : null;
     if (!studentId) { skipped.push(`Row ${i + 1}: School ID "${schoolId}" not found`); continue; }
-    const subjectId = subjectName ? subjectByName.get(subjectName.trim().toLowerCase()) : null;
+    let subjectId = subjectName ? subjectByName.get(subjectName.trim().toLowerCase()) : null;
+    if (!subjectId && subjectName) subjectId = resolveSubject(subjectName, subjects.rows, null)?.subject?.id || null; // short forms: MATHS, SST, C/A ...
     if (!subjectId) { skipped.push(`Row ${i + 1}: subject "${subjectName}" not found`); continue; }
 
     const score = (scoreRaw || '').trim();
@@ -185,4 +189,95 @@ marksRouter.post('/bulk', requireRole('admin'), asyncHandler(async (req, res) =>
     added++;
   }
   res.json({ added, skipped });
+}));
+
+// ---------- Excel: whole-school marks in the school's own sheet layout ----------
+// One workbook, one sheet per class ("GRD 4 RED", "Grade 9 Love", ...). Each
+// sheet's class is detected from its name, each column's subject from its
+// heading (short forms like MATHS / SST / C/A / SCIE&TECH are understood), and
+// each learner by name within that class. `dryRun: true` only previews.
+marksRouter.post('/import-excel', requireRole('admin'), asyncHandler(async (req, res) => {
+  const { examId, file, dryRun } = req.body;
+  if (!examId || !file) return res.status(400).json({ error: 'examId and an Excel file are required' });
+  const exam = await query(`SELECT id FROM exams WHERE id = $1 AND center_id = $2`, [examId, req.auth.centerId]);
+  if (!exam.rows[0]) return res.status(404).json({ error: 'Exam not found at this center' });
+
+  let sheets;
+  try { sheets = await readSheets(Buffer.from(file, 'base64')); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+
+  const [classes, subjects, students] = await Promise.all([
+    query(`SELECT id, name FROM classes WHERE center_id = $1`, [req.auth.centerId]),
+    query(`SELECT id, name, section FROM subjects WHERE center_id = $1`, [req.auth.centerId]),
+    query(`SELECT id, full_name, class_id FROM students WHERE center_id = $1 AND status = 'active'`, [req.auth.centerId]),
+  ]);
+  const studentsByClass = new Map();
+  for (const st of students.rows) {
+    if (!st.class_id) continue;
+    if (!studentsByClass.has(st.class_id)) studentsByClass.set(st.class_id, []);
+    studentsByClass.get(st.class_id).push(st);
+  }
+  const plan = buildPlan(sheets, { classes: classes.rows, subjects: subjects.rows, studentsByClass });
+
+  if (dryRun) return res.json({ dryRun: true, report: plan.report, totals: plan.totals, newSubjects: plan.newSubjects.map(s => s.name) });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const idByName = new Map(subjects.rows.map(s => [norm(s.name), s.id]));
+    for (const ns of plan.newSubjects) {
+      if (idByName.has(norm(ns.name))) continue;
+      const { rows } = await client.query(
+        `INSERT INTO subjects (center_id, name, section) VALUES ($1,$2,$3)
+         ON CONFLICT (center_id, name) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+        [req.auth.centerId, ns.name, ns.section]
+      );
+      idByName.set(norm(ns.name), rows[0].id);
+    }
+    // one row per student+subject (last one wins), then upsert in chunks
+    const dedup = new Map();
+    for (const m of plan.marks) dedup.set(`${m.studentId}|${m.subjectId || idByName.get(norm(m.subjectName))}`, { ...m, subjectId: m.subjectId || idByName.get(norm(m.subjectName)) });
+    const rows = [...dedup.values()];
+    for (let i = 0; i < rows.length; i += 1000) {
+      const part = rows.slice(i, i + 1000);
+      await client.query(
+        `INSERT INTO marks (exam_id, student_id, subject_id, sublevel, points, percent, entered_by_id)
+         SELECT $1, t.student_id, t.subject_id, t.sublevel, t.points, t.percent, NULL
+         FROM unnest($2::uuid[], $3::uuid[], $4::text[], $5::int[], $6::numeric[]) AS t(student_id, subject_id, sublevel, points, percent)
+         ON CONFLICT (exam_id, student_id, subject_id)
+         DO UPDATE SET sublevel = EXCLUDED.sublevel, points = EXCLUDED.points, percent = EXCLUDED.percent, updated_at = now()`,
+        [examId, part.map(r => r.studentId), part.map(r => r.subjectId), part.map(r => r.sublevel),
+          part.map(r => SUBLEVEL_POINTS[r.sublevel]), part.map(r => r.percent)]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ dryRun: false, added: rows.length, report: plan.report, totals: plan.totals, newSubjects: plan.newSubjects.map(s => s.name) });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}));
+
+// Blank marks workbook: one sheet per class, learners already listed, and the
+// subject columns that match each class's level (Pre-Primary / Lower Primary /
+// Upper Primary / Junior). Teachers fill it in; the importer reads it back.
+marksRouter.get('/template', requireRole('admin'), asyncHandler(async (req, res) => {
+  const [classes, students] = await Promise.all([
+    query(`SELECT id, name FROM classes WHERE center_id = $1 ORDER BY name`, [req.auth.centerId]),
+    query(`SELECT full_name, class_id FROM students WHERE center_id = $1 AND status = 'active' ORDER BY full_name`, [req.auth.centerId]),
+  ]);
+  const sheets = classes.rows.map(c => {
+    const p = parseClassLabel(c.name);
+    const level = p ? levelOfGrade(p.gradeKey) : null;
+    return {
+      name: c.name, title: c.name.toUpperCase(),
+      subjects: level ? subjectHeadersForLevel(level) : ['Mathematics', 'English', 'Kiswahili'],
+      learners: students.rows.filter(s => s.class_id === c.id).map(s => s.full_name),
+    };
+  });
+  const buf = await marksWorkbook(sheets);
+  res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="mohi-marks-sheet.xlsx"' });
+  res.send(Buffer.from(buf));
 }));
