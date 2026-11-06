@@ -157,9 +157,13 @@ table.mark-grid td.pts,td.pts{font-family:'IBM Plex Mono',monospace;color:var(--
 .rc-head h2{margin:0 0 4px;}
 .rc-org{font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--brand-blue);font-weight:700;}
 .rc-meta{text-align:right;font-size:0.82rem;color:var(--text-soft);line-height:1.6;}
-.rc-stats{display:flex;gap:28px;margin:18px 0 24px;flex-wrap:wrap;}
+.rc-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:18px 0 20px;}
+.rc-stats .stat{width:auto;min-width:0;padding:16px 10px;text-align:center;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.rc-stats .stat .num{font-size:2.1rem;line-height:1.1;}
+.rc-subjects table td.pts,.rc-subjects table th:not(:first-child){text-align:center;}
+@media (max-width:520px){.rc-stats{gap:8px;} .rc-stats .stat .num{font-size:1.5rem;}}
 .rc-footnote{font-size:0.76rem;color:var(--text-soft);margin-top:16px;line-height:1.6;}
-.rc-contacts{display:flex;gap:16px;margin-top:24px;flex-wrap:wrap;}
+.rc-contacts{display:flex;gap:16px;margin-top:16px;flex-wrap:wrap;}
 .rc-contact-card{flex:1;min-width:220px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:14px 16px;}
 .rc-contact-label{font-size:0.7rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-soft);font-weight:700;}
 .rc-contact-name{font-size:0.95rem;font-weight:600;margin:4px 0 2px;}
@@ -173,7 +177,15 @@ table.mark-grid td.pts,td.pts{font-family:'IBM Plex Mono',monospace;color:var(--
 @media print{
   body.dark-theme{color-scheme:light;--ink-navy:#1F2139;--paper:#F5F6F4;--paper-raised:#FFFFFF;--line:#DADFE2;--text:#1A2233;--text-soft:#5B6478;}
   body *{visibility:hidden;} .report-card,.report-card *{visibility:visible;}
-  .report-card{position:absolute;top:0;left:0;width:100%;border:none;padding:0;} .no-print{display:none!important;}
+  /* one A4 page: the subject table grows to fill the space, everything else sits below it */
+  @page{size:A4;margin:10mm;}
+  .report-card{position:absolute;top:0;left:0;width:100%;border:none;padding:0;overflow:visible;} .no-print{display:none!important;}
+  .report-card .rc-content{display:flex;flex-direction:column;min-height:275mm;}
+  .rc-subjects{flex:1;display:flex;flex-direction:column;min-height:0;}
+  .rc-subjects table{flex:1 1 auto;}
+  .rc-subjects td{padding-top:6px;padding-bottom:6px;}
+  .rc-contacts{margin-top:auto;padding-top:14px;}
+  .rc-footnote{margin-top:12px;text-align:center;border-top:1px solid var(--line);padding-top:8px;font-size:0.68rem;}
 }
 </style>
 </head>
@@ -1259,13 +1271,12 @@ async function renderStudentMain(examId){
         <div class="stat"><span class="num">${report.meanPoints!=null?report.meanPoints.toFixed(1):'—'}</span><span class="lbl">Mean points</span></div>
         <div class="stat"><span class="num">${report.meanLevel||'—'}</span><span class="lbl">Mean grade</span></div>
         <div class="stat"><span class="num">${report.position?'#'+report.position:'—'}</span><span class="lbl">Class position (of ${report.outOf})</span></div></div>
-      <table><thead><tr><th>Subject</th><th>%</th><th>Sub-level</th><th>Points</th><th>Level</th></tr></thead><tbody>${subjectRows}</tbody></table>
+      <div class="rc-subjects"><table><thead><tr><th>Subject</th><th>%</th><th>Sub-level</th><th>Points</th><th>Level</th></tr></thead><tbody>${subjectRows}</tbody></table></div>
       ${report.remark ? `<div style="margin-top:20px;padding:14px 16px;background:var(--paper);border-left:3px solid var(--brand-blue);border-radius:4px;">
         <div style="font-size:0.72rem;text-transform:uppercase;color:var(--text-soft);font-weight:700;margin-bottom:4px;">Class Teacher's Comment</div>
         <div style="font-size:0.9rem;line-height:1.5;">${escapeHtml(report.remark)}</div></div>` : ''}
-      <p class="rc-footnote">Mean grade and class position are internal MOHI tracking figures — official CBC/KNEC reporting has no aggregate score or ranking.</p>
-      <h3 style="margin-top:28px;">Term-over-term trend</h3>${sparklineSvg(trend.map(t=>t.meanPoints))}
-      <table style="margin-top:10px;"><thead><tr><th>Term / exam</th><th>Mean points</th><th>Mean grade</th><th>Position</th></tr></thead><tbody>${trendRows}</tbody></table>
+      <h3 style="margin-top:20px;">Term-over-term trend</h3>${trend.length>1?sparklineSvg(trend.map(t=>t.meanPoints)):''}
+      <table style="margin-top:6px;"><thead><tr><th>Term / exam</th><th>Mean points</th><th>Mean grade</th><th>Position</th></tr></thead><tbody>${trendRows}</tbody></table>
       <div class="rc-contacts">
         <div class="rc-contact-card"><div class="rc-contact-label">Class Teacher</div>
           ${report.classTeacher ? `<div class="rc-contact-name">${escapeHtml(report.classTeacher.full_name)}</div>
@@ -1275,7 +1286,7 @@ async function renderStudentMain(examId){
           <div class="rc-contact-name">${report.student.parentName?escapeHtml(report.student.parentName):'—'}</div>
           <div class="rc-contact-detail">${[report.student.parentPhone, report.student.parentEmail].filter(Boolean).map(escapeHtml).join(' · ')||'No contact on file'}</div></div>
       </div>
-      <p class="rc-footnote" style="margin-top:24px;text-align:center;border-top:1px solid var(--line);padding-top:14px;">— End of report —</p>
+      <p class="rc-footnote">Mean grade and class position are internal MOHI tracking figures — official CBC/KNEC reporting has no aggregate score or ranking.</p>
     </div></div>`;
   document.getElementById('studentExamSel').addEventListener('change', e=>renderStudentMain(e.target.value));
   lastReportClassTeacher = report.classTeacher;
