@@ -1,3 +1,30 @@
+/* ===== Excel in, Excel out: .xlsx uploads are converted to rows on the server, and "templates" download as .xlsx ===== */
+(function () {
+  const blobToB64 = f => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = () => no(new Error('Could not read that file.')); r.readAsDataURL(f); });
+  const authFetch = (path, body) => fetch(API_BASE + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken }, body: JSON.stringify(body) });
+  // Reads the chosen file as CSV text. .xlsx is converted on the server; a plain .csv still works.
+  window.readFileAsText = async function (inputEl) {
+    if (!inputEl.files.length) throw new Error('Choose an Excel file first.');
+    const f = inputEl.files[0];
+    if (/\.csv$/i.test(f.name)) return new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => no(new Error('Could not read that file.')); r.readAsText(f); });
+    if (!/\.xlsx$/i.test(f.name)) throw new Error('Please choose an Excel .xlsx file.');
+    const res = await authFetch('/excel/to-csv', { file: await blobToB64(f) });
+    let data = {}; try { data = await res.json(); } catch (e) {}
+    if (!res.ok) throw new Error(data.error || 'Could not read that Excel file.');
+    return data.csv;
+  };
+  // Same name as before so existing calls keep working, but the file is now an Excel workbook.
+  window.downloadCSV = async function (filename, rows) {
+    try {
+      const res = await authFetch('/excel/build', { sheetName: 'Template', rows });
+      if (!res.ok) { let m = 'Download failed'; try { m = (await res.json()).error || m; } catch (e) {} throw new Error(m); }
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a'); a.href = url; a.download = String(filename).replace(/\.csv$/i, '.xlsx');
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    } catch (err) { alert(err.message); }
+  };
+})();
+
 /* MOHI overview dashboards v2 (School Admin + IT Support). Loaded after the main script. */
 (function () {
   const S = (d, x) => `<svg viewBox="0 0 24 24" width="${x || 18}" height="${x || 18}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
@@ -400,7 +427,7 @@
   async function teacherTemplate() {
     const [c, s] = await Promise.all([api('/classes'), api('/subjects')]);
     const c1 = c[0] ? c[0].name : 'Grade 7 Joy', c2 = c[1] ? c[1].name : 'Grade 7 Love', s1 = s[0] ? s[0].name : 'Mathematics', s2 = s[1] ? s[1].name : 'English';
-    downloadCSV('mohi-teachers-template.csv', [['Full Name', 'Email', 'Password', 'Section', 'Class', 'Subject', 'Phone'],
+    downloadCSV('mohi-teachers-template.xlsx', [['Full Name', 'Email', 'Password', 'Section', 'Class', 'Subject', 'Phone'],
       ['Mrs. Grace Wambui', 'grace@mohiafrica.org', '', 'JUNIOR', c1 + '; ' + c2, s1 + '; ' + s2, '0712 345 678'],
       ['Mr. Peter Otieno', 'peter@mohiafrica.org', '', 'JUNIOR', c1, s2, '0722 111 222']]);
   }
@@ -411,16 +438,7 @@
     if (!a) return; const p = a.parentElement;
     a.onclick = () => { fn(); return false; }; p.innerHTML = html + ' '; p.appendChild(a);
   }
-  if (typeof renderResults === 'function') {
-    const o = window.renderResults;
-    window.renderResults = async function () {
-      const r = await o.apply(this, arguments);
-      const inp = document.getElementById('bulkMarksCsvFile'), st = inp && inp.closest('.panel') && inp.closest('.panel').querySelectorAll('p.sub strong');
-      const exam = st && st.length ? st[st.length - 1].textContent : 'the selected exam';
-      relabel('bulkMarksCsvFile', 'One row per student, one column per subject, like your Excel sheet. Columns: <strong>School ID</strong> (or ID/CIN). If you have no ID, use <strong>Student Name</strong> and Class instead (names must match exactly, and clashes are skipped). Then a column for each subject. Leave a cell empty, or put - or x, if the student did not sit it. Scores are 0 to 100. Applies to <strong>' + exam + '</strong>.', marksTemplate);
-      return r;
-    };
-  }
+  // Marks upload: the page's own Excel workbook (one sheet per class) is used as-is, so no CSV relabelling here.
   if (typeof renderTeachers === 'function') {
     const o = window.renderTeachers;
     window.renderTeachers = async function () {
@@ -689,10 +707,10 @@
         <div id="stuList"></div></div>
       <div class="panel" id="dupPanel"><h3>Duplicate IDs</h3><p class="sub">Every ID must be unique across all centers. Find students whose ID is used more than once (for example MOHI-025100 and 025100) and delete the extras.</p>
         <div class="row-form"><button class="btn small" onclick="dupScan()">Find duplicates</button><button class="btn small ghost" onclick="idFix()">Add MOHI- to IDs that are only numbers</button></div><div id="dupOut"></div></div>
-      <div class="panel"><h3>Bulk upload students (CSV)</h3>
+      <div class="panel"><h3>Bulk upload students (Excel)</h3>
         <p class="sub">Columns: <strong>Full Name, School ID, Class</strong>. Class must match an existing class name exactly.
-        <a href="#" onclick="downloadCSV('mohi-students-template.csv', [['Full Name','School ID','Class'],['Peter Kamau','MOHI-0210','${classes[0] ? e(classes[0].name) : 'Grade 7 Blue'}']]); return false;">Download CSV template</a></p>
-        <div class="row-form"><div class="field"><label for="studentCsvFile">CSV file</label><input type="file" id="studentCsvFile" accept=".csv,text/csv"></div>
+        <a href="#" onclick="downloadCSV('mohi-students-template.xlsx', [['Full Name','School ID','Class'],['Peter Kamau','MOHI-0210','${classes[0] ? e(classes[0].name) : 'Grade 7 Blue'}']]); return false;">Download Excel template</a></p>
+        <div class="row-form"><div class="field"><label for="studentCsvFile">Excel file</label><input type="file" id="studentCsvFile" accept=".xlsx,.csv"></div>
         <button class="btn small" onclick="importStudentsCsv()">Upload &amp; add students</button></div>${summaryHtml || ''}</div>`;
     document.getElementById('stuClassSel').onchange = ev => { S.classId = ev.target.value; S.q = ''; document.getElementById('stuSearch').value = ''; S.sel.clear(); draw(); };
     document.getElementById('stuSearch').oninput = ev => { S.q = ev.target.value; draw(); };

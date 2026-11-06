@@ -18,6 +18,7 @@ import { editRequestsRouter } from './routes/editRequests.js';
 import { reportCardRouter } from './routes/reportCard.js';
 import { studentTransferRouter } from './routes/studentTransfer.js';
 import { passwordRequestsRouter } from './routes/passwordRequests.js';
+import { excelRouter } from './routes/excel.js';
 import { ensureSchema } from './lib/autoMigrate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -58,6 +59,7 @@ app.use('/edit-requests', editRequestsRouter);
 app.use('/report-card', reportCardRouter);
 app.use('/student-transfer', studentTransferRouter);
 app.use('/password-requests', passwordRequestsRouter);
+app.use('/excel', excelRouter);
 
 // The frontend (public/index.html) is served by this same app â€” one service,
 // one URL, no separate static host and no CORS setup needed. API routes are

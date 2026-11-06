@@ -76,3 +76,25 @@ export async function marksWorkbook(sheets) {
   if (!wb.worksheets.length) wb.addWorksheet('Marks');
   return wb.xlsx.writeBuffer();
 }
+
+// First sheet -> properly quoted CSV text (commas, quotes and line breaks inside
+// cells are preserved). Used by the browser so an uploaded .xlsx can go through
+// the same parsers that used to read .csv files.
+export async function firstSheetToQuotedCsv(buffer) {
+  const [sheet] = await readSheets(buffer);
+  if (!sheet) throw new Error('That workbook has no sheets.');
+  const q = v => {
+    const s = v == null ? '' : String(v).trim();
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  return sheet.rows
+    .filter(r => r.some(v => v != null && String(v).trim() !== ''))
+    .map(r => r.map(q).join(','))
+    .join('\n');
+}
+
+// rows (array of arrays, first row = headings) -> .xlsx buffer.
+export async function rowsToWorkbook(sheetName, rows) {
+  const [headers = [], ...rest] = rows;
+  return simpleTemplate(String(sheetName || 'Sheet1').slice(0, 31), headers, rest, headers.map(h => Math.max(14, String(h).length + 4)));
+}
