@@ -52,4 +52,17 @@ export async function ensureSchema() {
     ALTER TABLE teachers ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT true;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_email ON teachers (lower(email)) WHERE email IS NOT NULL;
   `);
+
+  // Older databases may have a students table missing columns the app now writes.
+  // Safe to repeat: adds only what is absent, never touches existing data.
+  await pool.query(`
+    ALTER TABLE students ADD COLUMN IF NOT EXISTS date_of_birth date;
+    ALTER TABLE students ADD COLUMN IF NOT EXISTS gender text;
+    ALTER TABLE students ADD COLUMN IF NOT EXISTS enrollment_date date NOT NULL DEFAULT current_date;
+    ALTER TABLE students ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active';
+    ALTER TABLE students ADD COLUMN IF NOT EXISTS password_changed boolean NOT NULL DEFAULT false;
+    ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_name text;
+    ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone text;
+    ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_email text;
+  `);
 }

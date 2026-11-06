@@ -71,6 +71,14 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 // Centralized error handler â€” keeps internal error detail out of API responses.
 app.use((err, req, res, next) => {
   console.error(err);
+  // Translate common database errors into something the user can act on.
+  if (err.code === '23505') return res.status(409).json({ error: 'That record already exists (duplicate value).' });
+  if (err.code === '22P02' || err.code === '23503' || err.code === '23502' || err.code === '22001') {
+    return res.status(400).json({ error: `Invalid data: ${err.message}` });
+  }
+  if (err.code === '42703' || err.code === '42P01') {
+    return res.status(500).json({ error: `Database is out of date: ${err.message}` });
+  }
   res.status(500).json({ error: 'Internal server error' });
 });
 
