@@ -252,6 +252,7 @@ table.mark-grid td.pts,td.pts{font-family:'IBM Plex Mono',monospace;color:var(--
         <button class="nav-item" data-view="subjects">Subjects</button>
         <button class="nav-item" data-view="teachers">Teachers</button>
         <button class="nav-item" data-view="students">Students</button>
+        <button class="nav-item" data-view="promotion">Promotion</button>
         <button class="nav-item" data-view="exams">Exams</button>
         <button class="nav-item" data-view="results">Results</button>
         <button class="nav-item" data-view="notifications">Notifications<span id="pendingBadge"></span></button>
@@ -569,6 +570,7 @@ async function renderAdminView(view){
     if(view==='subjects') return await renderSubjects(main);
     if(view==='teachers') return await renderTeachers(main);
     if(view==='students') return await renderStudents(main);
+    if(view==='promotion') return await renderPromotion(main);
     if(view==='exams') return await renderExams(main);
     if(view==='results') return await renderResults(main);
     if(view==='notifications') return await renderNotifications(main);
@@ -1318,5 +1320,6 @@ function toggleTheme(){
 })();
 </script>
 <script src="/overview-patch.js"></script>
+<script src="/promotion.js"></script>
 </body>
 </html>

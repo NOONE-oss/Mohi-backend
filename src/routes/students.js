@@ -18,7 +18,7 @@ studentsRouter.get('/', requireRole('admin', 'teacher'), asyncHandler(async (req
   const { rows } = await query(
     `SELECT id, school_id_number, full_name, class_id, status, password_changed,
             parent_name, parent_phone, parent_email
-     FROM students WHERE center_id = $1 ORDER BY full_name`,
+     FROM students WHERE center_id = $1 AND status <> 'left' ORDER BY full_name`,
     [req.auth.centerId]
   );
   res.json(rows);

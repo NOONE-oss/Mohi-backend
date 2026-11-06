@@ -34,6 +34,7 @@
     classes: '<path d="M4 5h7v14H4zM13 5h7v14h-7z"/>',
     subjects: '<path d="M2 5c3-1 7-1 10 1v14c-3-2-7-2-10-1zM22 5c-3-1-7-1-10 1v14c3-2 7-2 10-1z"/>',
     teachers: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/>',
+    promotion: '<path d="M12 20V6"/><path d="M6 11l6-6 6 6"/><path d="M5 20h14"/>',
     students: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-4 3-6 7-6s7 2 7 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c3 0 5 1.5 5 5"/>',
     exams: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM8.5 12h7M8.5 16h7"/>',
     results: '<path d="M5 20V10M12 20V4M19 20v-7"/>',
